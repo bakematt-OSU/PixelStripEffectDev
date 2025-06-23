@@ -2,27 +2,71 @@
 #include "PixelStrip.h"
 #include "effects/Effects.h"
 
-// LED config
 #define LED_PIN    4
 #define LED_COUNT  300
-#define BRIGHTNESS 100
-#define SEGMENTS   2
+#define BRIGHTNESS 25
+#define SEGMENTS   1
 
 PixelStrip strip(LED_PIN, LED_COUNT, BRIGHTNESS, SEGMENTS);
 PixelStrip::Segment* seg;
 
+enum EffectType {
+  RAINBOW,
+  SOLID,
+  EFFECT_COUNT
+};
+
+EffectType currentEffect = RAINBOW;
+
+void applyEffect(EffectType effect) {
+  // Stop all effects
+  RainbowChase::stop(seg);
+  SolidColor::stop(seg);
+
+  seg->clear();
+  currentEffect = effect;
+
+  switch (effect) {
+    case RAINBOW:
+      RainbowChase::start(seg, 30, 175);
+      break;
+    case SOLID:
+      SolidColor::start(seg, strip.Color(0, 255, 0), 200);
+      break;
+    default:
+      break;
+  }
+}
+
+void handleSerial() {
+  if (Serial.available()) {
+    String cmd = Serial.readStringUntil('\n');
+    cmd.trim();
+    cmd.toLowerCase();
+
+    if (cmd == "next") {
+      currentEffect = static_cast<EffectType>((currentEffect + 1) % EFFECT_COUNT);
+      applyEffect(currentEffect);
+    } else if (cmd == "rainbow") {
+      applyEffect(RAINBOW);
+    } else if (cmd == "solid") {
+      applyEffect(SOLID);
+    } else {
+      Serial.println("Unknown command. Try 'next', 'rainbow', or 'solid'.");
+    }
+  }
+}
+
 void setup() {
   Serial.begin(115200);
-  while (!Serial); // Wait for serial monitor
+  while (!Serial);
   strip.begin();
-
-  // Get first segment and start effect
-  seg = strip.getSegments()[1];  // index 1 is first user segment (after "all")
-  strip.getSegments()[1]->begin();
-  RainbowChase::start(seg, 10, 100);  // 10ms delay, 100 brightness
-  SolidColor::start(seg, strip.Color(0, 255, 0), 150);
+  seg = strip.getSegments()[1];
+  seg->begin();
+  applyEffect(currentEffect);
 }
 
 void loop() {
-  seg->update();  // Run the effect
+  handleSerial();
+  seg->update();
 }
