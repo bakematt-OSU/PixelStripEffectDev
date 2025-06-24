@@ -1,6 +1,6 @@
 #include <Arduino.h>
 #include "PixelStrip.h"
-#include "effects/Effects.h"
+// #include "effects/Effects.h"
 #include "Triggers.h"      
 #include <PDM.h>           
 
