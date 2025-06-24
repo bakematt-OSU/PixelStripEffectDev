@@ -1,11 +1,15 @@
 #include "PixelStrip.h"
+// The Effects.h header likely includes all your individual effect files.
+// The error originates from the code inside these files.
 #include "./effects/Effects.h"
 
 PixelStrip::PixelStrip(uint8_t pin, uint16_t ledCount, uint8_t brightness, uint8_t numSections)
-    : strip(ledCount, pin, NEO_GRB + NEO_KHZ800)
+    // Initializer now uses NeoPixelBus constructor
+    : strip(ledCount, pin)
 {
-    strip.setBrightness(brightness);
+    // The initial brightness is passed to the default "all" segment.
     segments_.push_back(new Segment(*this, 0, ledCount - 1, String("all"), 0));
+    segments_[0]->setBrightness(brightness);
 
     if (numSections > 0)
     {
@@ -14,6 +18,7 @@ PixelStrip::PixelStrip(uint8_t pin, uint16_t ledCount, uint8_t brightness, uint8
         {
             uint16_t start = s * per;
             uint16_t end = (s == numSections - 1) ? (ledCount - 1) : (start + per - 1);
+            // New segments will inherit the default brightness of 255, which can be set later.
             segments_.push_back(new Segment(*this, start, end, String("seg") + String(s + 1), s + 1));
         }
     }
@@ -27,22 +32,49 @@ void PixelStrip::addSection(uint16_t start, uint16_t end, const String &name)
 
 void PixelStrip::begin()
 {
-    strip.begin();
-    // strip.show();
+    // Uses NeoPixelBus method to initialize the strip
+    strip.Begin();
 }
-void PixelStrip::show() { /*strip.show()*/; }
+
+void PixelStrip::show()
+{
+    // This is now a non-blocking call.
+    // It checks if the hardware is ready and only sends data if it is.
+    if (strip.CanShow()) {
+        strip.Show();
+    }
+}
+
 void PixelStrip::clear()
 {
-    strip.clear();
-    // strip.show();
+    // Uses NeoPixelBus method to clear all pixels to black
+    strip.ClearTo(RgbColor(0, 0, 0));
 }
-uint32_t PixelStrip::Color(uint8_t r, uint8_t g, uint8_t b) { return strip.Color(r, g, b); }
-void PixelStrip::setPixel(uint16_t i, uint32_t col) { strip.setPixelColor(i, col); }
-void PixelStrip::clearPixel(uint16_t i) { strip.setPixelColor(i, 0); }
+
+uint32_t PixelStrip::Color(uint8_t r, uint8_t g, uint8_t b) {
+    // This helper function remains the same.
+    return ((uint32_t)r << 16) | ((uint32_t)g << 8) | b;
+}
+
+void PixelStrip::setPixel(uint16_t i, uint32_t col) {
+    // This is the new brightness handling logic.
+    // 1. Deconstruct the 32-bit color into an RgbColor object.
+    RgbColor color( (col >> 16) & 0xFF, (col >> 8) & 0xFF, col & 0xFF );
+    // 2. Apply the segment's brightness using the Dim() method.
+    color.Dim(activeBrightness_);
+    // 3. Set the pixel color in the strip's buffer.
+    strip.SetPixelColor(i, color);
+}
+
+void PixelStrip::clearPixel(uint16_t i) {
+    // Uses NeoPixelBus method with a black color object.
+    strip.SetPixelColor(i, RgbColor(0));
+}
 
 PixelStrip::Segment::Segment(PixelStrip &p, uint16_t s, uint16_t e, const String &n, uint8_t i)
     : parent(p), startIdx(s), endIdx(e), name(n), id(i),
-      brightness(p.strip.getBrightness())
+      // Set default brightness to max. Can be changed via setBrightness().
+      brightness(255)
 {
 }
 
@@ -57,12 +89,16 @@ void PixelStrip::Segment::begin()
 void PixelStrip::Segment::setBrightness(uint8_t b)
 {
     brightness = b;
-    parent.strip.setBrightness(b);
 }
+
 uint8_t PixelStrip::Segment::getBrightness() const { return brightness; }
 
 void PixelStrip::Segment::update()
 {
+    // Set the parent strip's active brightness to this segment's value.
+    // This provides the correct brightness context for all subsequent setPixel() calls.
+    parent.setActiveBrightness(brightness);
+
     switch (activeEffect)
     {
     case SegmentEffect::RAINBOW:
@@ -87,27 +123,29 @@ void PixelStrip::Segment::update()
 
 void PixelStrip::Segment::allOff()
 {
-    for (uint16_t i = startIdx; i <= endIdx; ++i)
-        parent.strip.setPixelColor(i, 0);
-    // parent.strip.show();
+    // Set all pixels in the segment to black.
+    RgbColor black(0);
+    for (uint16_t i = startIdx; i <= endIdx; ++i) {
+        parent.getStrip().SetPixelColor(i, black);
+    }
 }
 
 void PixelStrip::Segment::setEffect(SegmentEffect effect)
 {
-    // 🔸 Turn off all effects
+    // Turn off all effects
     rainbowActive = false;
     allOnActive = false;
     flashTriggerActive = false;
 
-    // Optionally clear the LEDs (remove this if you want to retain visuals during switch)
     clear();
 
-    // 🔸 Set new active effect
+    // Set new active effect
     activeEffect = effect;
 }
 
 
 uint32_t PixelStrip::ColorHSV(uint16_t hue, uint8_t sat, uint8_t val) {
+    // This function is self-contained and does not need changes.
     uint8_t r, g, b;
 
     uint8_t region = hue / 10923; // 65536 / 6

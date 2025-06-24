@@ -3,7 +3,7 @@
 
 #include "../PixelStrip.h"
 
-namespace SolidColor{
+namespace SolidColor {
 
 inline void start(PixelStrip::Segment* seg, uint32_t color, uint8_t brightness = 255) {
     seg->setEffect(PixelStrip::Segment::SegmentEffect::SOLID);
@@ -15,10 +15,14 @@ inline void start(PixelStrip::Segment* seg, uint32_t color, uint8_t brightness =
 inline void update(PixelStrip::Segment* seg) {
     if (!seg->allOnActive) return;
 
-    for (uint16_t i = seg->startIndex(); i <= seg->endIndex(); ++i)
+    // Loop through each pixel in the segment.
+    for (uint16_t i = seg->startIndex(); i <= seg->endIndex(); ++i) {
+        // --- CORRECTED LINE ---
+        // Set the pixel to the segment's stored color. Brightness is handled automatically.
         seg->getParent().setPixel(i, seg->allOnColor);
+    }
 
-    seg->getParent().show();
+    // REMOVED: seg->getParent().show(); - This should be called in your main loop.
 }
 
 inline void stop(PixelStrip::Segment* seg) {

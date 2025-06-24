@@ -154,24 +154,6 @@ void setup()
   applyEffect(currentEffect);
 }
 
-// void loop()
-// {
-//   static unsigned long lastBeat = 0;
-//   if (millis() - lastBeat > 1000)
-//   {
-//     Serial.println("[Loop] alive");
-//     lastBeat = millis();
-//   }
-
-//   handleSerial();
-
-//   if (currentEffect == FLASH_TRIGGER)
-//   {
-//     updateFlashTriggerFromMic(400, 1500);
-//   }
-
-//   seg->update();
-// }
 
 void loop() {
   static unsigned long lastBeat = 0;
@@ -180,12 +162,22 @@ void loop() {
     lastBeat = millis();
   }
 
+  // Handle any user input
   handleSerial();
 
+  // If the current effect is flash, check the microphone
   if (currentEffect == FLASH_TRIGGER) {
     updateFlashTriggerFromMic(400, 1500);
   }
 
+  // Update the color data in the memory buffer based on the active effect
   seg->update();
-  delay(5);  // Add to reduce CPU saturation
+  
+  // --- THIS IS THE CORRECT PLACE ---
+  // Push the updated color data to the physical LED strip.
+  strip.show();
+
+//   // The delay is likely no longer needed, but you can keep it if it helps
+//   // with other parts of your code. You can try removing it.
+//   delay(5);
 }
