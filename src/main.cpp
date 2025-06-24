@@ -2,27 +2,28 @@
 #include "PixelStrip.h"
 #include "effects/Effects.h"
 #include "Sensors.h"
+#include "Triggers.h" // <-- INCLUDE THE NEW MODULAR TRIGGER FILE
 
+// --- Pin and LED Definitions ---
 #define LED_PIN 4
 #define LED_COUNT 300
 #define BRIGHTNESS 25
 #define SEGMENTS 1
-#define TRIGGER_PIN 2 // 🔸 Example digital pin for trigger input
+#define MIC_PIN A0 // Define the analog pin for the microphone
 
+// --- Global Objects ---
 PixelStrip strip(LED_PIN, LED_COUNT, BRIGHTNESS, SEGMENTS);
 PixelStrip::Segment *seg;
-// Microphone mic(400); // This line is commented out, assuming you use the singleton Microphone::instance()
 
-enum EffectType
-{
-  RAINBOW,
-  SOLID,
-  FLASH_TRIGGER,
-  EFFECT_COUNT
-};
+// Create an instance of our new AudioTrigger.
+// We pass it the microphone instance, default mode, and the analog pin.
+AudioTrigger audioTrigger(Microphone::instance(), AudioTrigger::PEAK, MIC_PIN, 400, 1500, 20);
 
+// --- State Enums and Variables ---
+enum EffectType { RAINBOW, SOLID, FLASH_TRIGGER, EFFECT_COUNT };
 EffectType currentEffect = RAINBOW;
 
+// These global variables are still needed because the FlashOnTrigger effect reads them directly.
 bool flashTriggerState = false;
 uint8_t flashTriggerBrightness = 0;
 void setFlashTrigger(bool value, uint8_t brightness = 0)
@@ -31,130 +32,84 @@ void setFlashTrigger(bool value, uint8_t brightness = 0)
   flashTriggerBrightness = brightness;
 }
 
+// --- CALLBACK FUNCTION ---
+// This is the specific action for the LEDs.
+// The AudioTrigger will call this function when a sound is detected.
+void ledFlashCallback(bool isActive, uint8_t brightness) {
+    setFlashTrigger(isActive, brightness);
+}
+
 void applyEffect(EffectType effect, PixelStrip::Segment* targetSegment)
 {
-  if (!targetSegment) return; // Safety check
+  if (!targetSegment) return;
   currentEffect = effect;
 
   switch (effect)
   {
-  case RAINBOW:
-    RainbowChase::start(targetSegment, 30, 50);
-    break;
-
-  case SOLID:
-    SolidColor::start(targetSegment, strip.Color(0, 255, 0), 50);
-    break;
-
-  case FLASH_TRIGGER:
-    FlashOnTrigger::start(targetSegment, strip.Color(0, 0, 255), false, 100);
-    break;
-
-  default:
-    break;
+    case RAINBOW:
+      // When switching to a non-trigger effect, disable the audio trigger.
+      audioTrigger.onTrigger(nullptr); 
+      RainbowChase::start(targetSegment, 30, 50);
+      break;
+    case SOLID:
+      audioTrigger.onTrigger(nullptr);
+      SolidColor::start(targetSegment, strip.Color(0, 255, 0), 50);
+      break;
+    case FLASH_TRIGGER:
+      // When we select this effect, we also tell the trigger
+      // to use our LED callback function. The specific mode (PEAK vs BASS)
+      // is set by the serial command.
+      audioTrigger.onTrigger(ledFlashCallback);
+      FlashOnTrigger::start(targetSegment, strip.Color(0, 0, 255), false, 100);
+      break;
   }
 }
 
-void handleSerial()
-{
-  if (Serial.available())
-  {
-    String cmd = Serial.readStringUntil('\n');
-    cmd.trim();
-    cmd.toLowerCase();
+void handleSerial() {
+    if (Serial.available()) {
+        String cmd = Serial.readStringUntil('\n');
+        cmd.trim();
+        cmd.toLowerCase();
 
-    if (cmd == "next")
-    {
-      currentEffect = static_cast<EffectType>((currentEffect + 1) % EFFECT_COUNT);
-      applyEffect(currentEffect, seg);
+        if (cmd == "micflash") {
+            Serial.println(">>> Trigger Mode: PEAK volume");
+            Microphone::instance().begin(); // Needed for peak detection
+            audioTrigger.setDetectionMode(AudioTrigger::PEAK);
+            // You can adjust the threshold for peak detection here
+            audioTrigger.setThreshold(400); 
+            applyEffect(FLASH_TRIGGER, seg);
+        } 
+        else if (cmd == "bassflash") {
+            Serial.println(">>> Trigger Mode: BASS frequency");
+            audioTrigger.setDetectionMode(AudioTrigger::BASS);
+            // Bass detection often requires a different threshold. Tune this value.
+            audioTrigger.setThreshold(1500); 
+            applyEffect(FLASH_TRIGGER, seg);
+        }
+        else if (cmd == "micstop") {
+            Serial.println(">>> Disabling Audio Trigger");
+            applyEffect(RAINBOW, seg); // Switches to a default effect, which also disables the trigger
+        }
+        else if (cmd == "next" || cmd == "rainbow" || cmd == "solid") {
+             // Handle other commands to switch effects
+            if (cmd == "next") currentEffect = static_cast<EffectType>((currentEffect + 1) % EFFECT_COUNT);
+            if (cmd == "rainbow") currentEffect = RAINBOW;
+            if (cmd == "solid") currentEffect = SOLID;
+            applyEffect(currentEffect, seg);
+        }
     }
-    else if (cmd == "rainbow")
-      applyEffect(RAINBOW, seg);
-    else if (cmd == "solid")
-      applyEffect(SOLID, seg);
-    else if (cmd == "micflash")
-    {
-      Serial.println(">>> micflash: beginning mic");
-      Microphone::instance().begin();
-      Microphone::instance().setThreshold(400); // Default threshold
-      Serial.println(">>> micflash: mic started");
-      applyEffect(FLASH_TRIGGER, seg);
-    }
-    else if (cmd.startsWith("micflash "))
-    {
-      int threshold = cmd.substring(9).toInt();
-      Serial.print("Setting mic threshold to: ");
-      Serial.println(threshold);
-      Microphone::instance().setThreshold(threshold);
-      applyEffect(FLASH_TRIGGER, seg);
-    }
-    else if (cmd == "micstop")
-    {
-      Serial.println("Stopping microphone");
-      Microphone::instance().stop();
-      applyEffect(RAINBOW, seg); // Reset to a default effect
-    }
-    else if (cmd.startsWith("triggeron "))
-    {
-      int val = cmd.substring(10).toInt();
-      setFlashTrigger(true, constrain(val, 0, 255));
-    }
-    else if (cmd == "triggeron")
-    {
-      setFlashTrigger(true, 128); // default brightness
-    }
-    else if (cmd == "triggeroff")
-    {
-      setFlashTrigger(false);
-    }
-    else
-      Serial.println("Unknown command. Try 'next', 'rainbow', 'solid', or 'micflash'.");
-  }
 }
 
-// REVERTED: This function now calculates brightness based on volume.
-void updateFlashTriggerFromMic(int threshold, int peakMax, int minBrightness = 20)
-{
-  Microphone &mic = Microphone::instance();
-  if (mic.available())
-  {
-    int peak = mic.readPeak();
-    // Uncomment the line below for debugging microphone values
-    // Serial.print("[Mic] Peak = "); Serial.println(peak);
-
-    if (peak >= threshold)
-    {
-      // Map peak amplitude to brightness (minBrightness–255)
-      int brightness = map(peak, threshold, peakMax, minBrightness, 255);
-      brightness = constrain(brightness, minBrightness, 255);
-
-      // Uncomment for debugging trigger events
-      // Serial.print("→ Triggering at brightness: "); Serial.println(brightness);
-
-      setFlashTrigger(true, brightness);
-    }
-    else
-    {
-      setFlashTrigger(false);
-    }
-  }
-}
 
 void setup()
 {
   Serial.begin(115200);
-  while (!Serial)
-    ; // wait for USB
-
-  pinMode(TRIGGER_PIN, INPUT);
+  while (!Serial);
 
   strip.begin();
-  
-  // Correctly get the first user-defined segment (index 1)
   if (strip.getSegments().size() > 1) {
       seg = strip.getSegments()[1];
   } else {
-      // Fallback to the 'all' segment if no others exist
       seg = strip.getSegments()[0]; 
   }
   seg->begin();
@@ -164,27 +119,17 @@ void setup()
 
 
 void loop() {
-  static unsigned long lastBeat = 0;
-  if (millis() - lastBeat > 1000) {
-    // A simple heartbeat to know the loop is running
-    // Serial.println("[Loop] alive");
-    lastBeat = millis();
-  }
-
   handleSerial();
 
-  // If the current effect is flash, check the microphone peak volume
-  if (currentEffect == FLASH_TRIGGER) {
-    // REVERTED: Call the function with all parameters for variable brightness.
-    // Adjust these values to tune the sensitivity.
-    // updateFlashTriggerFromMic(threshold, peak_max, min_brightness)
-    updateFlashTriggerFromMic(2000, 15000, 20); 
-  }
+  // --- Simplified Main Loop ---
+  // 1. Check for trigger events. If a callback is registered, it will be called.
+  audioTrigger.update();
 
-  // Update segment state and push to strip
+  // 2. Update the LED strip based on the current state.
   seg->update();
-  strip.show();
 
-  // A small delay can help with stability and prevent overwhelming the serial port
+  // 3. Show the result.
+  strip.show();
+  
   delay(5); 
 }
