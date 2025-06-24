@@ -4,6 +4,7 @@
 #include "effects/FlashOnTrigger.h"
 #include "effects/RainbowCycle.h"
 #include "effects/TheaterChase.h"
+#include "effects/Fire.h"
 
 //================================================================================
 // PixelStrip Class Methods
@@ -34,37 +35,50 @@ void PixelStrip::addSection(uint16_t start, uint16_t end, const String &name)
 }
 
 void PixelStrip::begin() { strip.Begin(); }
-void PixelStrip::show() { if (strip.CanShow()) { strip.Show(); } }
+void PixelStrip::show()
+{
+    if (strip.CanShow())
+    {
+        strip.Show();
+    }
+}
 void PixelStrip::clear() { strip.ClearTo(RgbColor(0)); }
 
-uint32_t PixelStrip::Color(uint8_t r, uint8_t g, uint8_t b) { 
-    return ((uint32_t)r << 16) | ((uint32_t)g << 8) | b; 
+uint32_t PixelStrip::Color(uint8_t r, uint8_t g, uint8_t b)
+{
+    return ((uint32_t)r << 16) | ((uint32_t)g << 8) | b;
 }
 
-void PixelStrip::setPixel(uint16_t i, uint32_t col) {
+void PixelStrip::setPixel(uint16_t i, uint32_t col)
+{
     RgbColor color((col >> 16) & 0xFF, (col >> 8) & 0xFF, col & 0xFF);
     color.Dim(activeBrightness_);
     strip.SetPixelColor(i, color);
 }
 
-void PixelStrip::clearPixel(uint16_t i) { 
-    strip.SetPixelColor(i, RgbColor(0)); 
+void PixelStrip::clearPixel(uint16_t i)
+{
+    strip.SetPixelColor(i, RgbColor(0));
 }
 
-uint32_t PixelStrip::ColorHSV(uint16_t hue, uint8_t sat, uint8_t val) {
+uint32_t PixelStrip::ColorHSV(uint16_t hue, uint8_t sat, uint8_t val)
+{
     HsbColor hsb(hue / 65535.0f, sat / 255.0f, val / 255.0f);
     RgbColor rgb = hsb;
     return Color(rgb.R, rgb.G, rgb.B);
 }
 
 // --- REQUIRED: Implementations for missing functions ---
-void PixelStrip::setActiveBrightness(uint8_t b) {
+void PixelStrip::setActiveBrightness(uint8_t b)
+{
     activeBrightness_ = b;
 }
-const std::vector<PixelStrip::Segment *> &PixelStrip::getSegments() const {
+const std::vector<PixelStrip::Segment *> &PixelStrip::getSegments() const
+{
     return segments_;
 }
-PixelBus &PixelStrip::getStrip() {
+PixelBus &PixelStrip::getStrip()
+{
     return strip;
 }
 
@@ -87,7 +101,8 @@ uint8_t PixelStrip::Segment::getBrightness() const { return brightness; }
 
 void PixelStrip::Segment::allOff()
 {
-    for (uint16_t i = startIndex(); i <= endIndex(); ++i) {
+    for (uint16_t i = startIndex(); i <= endIndex(); ++i)
+    {
         parent.getStrip().SetPixelColor(i, RgbColor(0));
     }
 }
@@ -99,7 +114,8 @@ void PixelStrip::Segment::setEffect(SegmentEffect effect)
     activeEffect = effect;
 }
 
-void PixelStrip::Segment::setTriggerState(bool isActive, uint8_t brightness) {
+void PixelStrip::Segment::setTriggerState(bool isActive, uint8_t brightness)
+{
     triggerIsActive = isActive;
     triggerBrightness = brightness;
 }
@@ -109,11 +125,16 @@ void PixelStrip::Segment::startEffect(SegmentEffect effect, uint32_t color1, uin
     setEffect(effect);
     switch (effect)
     {
-        #define EFFECT_START_CASE(name, className) \
-            case SegmentEffect::name: className::start(this, color1, color2); break;
+#define EFFECT_START_CASE(name, className)      \
+    case SegmentEffect::name:                   \
+        className::start(this, color1, color2); \
+        break;
         EFFECT_LIST(EFFECT_START_CASE)
-        #undef EFFECT_START_CASE
-        case SegmentEffect::NONE: default: clear(); break;
+#undef EFFECT_START_CASE
+    case SegmentEffect::NONE:
+    default:
+        clear();
+        break;
     }
 }
 
@@ -123,13 +144,15 @@ void PixelStrip::Segment::update()
 
     switch (activeEffect)
     {
-        #define EFFECT_UPDATE_CASE(name, className) \
-            case SegmentEffect::name: className::update(this); break;
+#define EFFECT_UPDATE_CASE(name, className) \
+    case SegmentEffect::name:               \
+        className::update(this);            \
+        break;
         EFFECT_LIST(EFFECT_UPDATE_CASE)
-        #undef EFFECT_UPDATE_CASE
-        
-        case SegmentEffect::NONE: 
-        default: 
-            break;
+#undef EFFECT_UPDATE_CASE
+
+    case SegmentEffect::NONE:
+    default:
+        break;
     }
 }

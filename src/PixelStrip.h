@@ -2,7 +2,7 @@
 #define PIXELSTRIP_H
 
 #include <Arduino.h>
-#include <NeoPixelBus.h> 
+#include <NeoPixelBus.h>
 #include <vector>
 #include "effects/Effects.h"
 
@@ -17,10 +17,10 @@ public:
         enum class SegmentEffect
         {
             NONE,
-            #define EFFECT_ENUM_ENTRY(name, className) name,
+#define EFFECT_ENUM_ENTRY(name, className) name,
             EFFECT_LIST(EFFECT_ENUM_ENTRY)
-            #undef EFFECT_ENUM_ENTRY
-            EFFECT_COUNT
+#undef EFFECT_ENUM_ENTRY
+                EFFECT_COUNT
         };
 
         Segment(PixelStrip &parent, uint16_t startIdx, uint16_t endIdx, const String &name, uint8_t id);
@@ -35,15 +35,15 @@ public:
         void update();
         void allOff();
         inline void clear() { allOff(); }
-        
+
         void setEffect(SegmentEffect effect);
         void startEffect(SegmentEffect effect, uint32_t color1 = 0, uint32_t color2 = 0);
-        
+
         void setTriggerState(bool isActive, uint8_t brightness);
 
         void setBrightness(uint8_t b);
         uint8_t getBrightness() const;
-        
+
         PixelStrip &getParent() { return parent; }
 
         // --- UNIFIED STATE VARIABLES ---
@@ -52,7 +52,7 @@ public:
         uint32_t baseColor = 0;
         unsigned long lastUpdate = 0;
         unsigned long interval = 0;
-        
+
         // State for Trigger-based effects
         bool triggerIsActive = false;
         uint8_t triggerBrightness = 0;
