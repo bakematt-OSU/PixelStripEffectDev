@@ -1,57 +1,81 @@
-#ifndef FLASH_ON_TRIGGER_H
-#define FLASH_ON_TRIGGER_H
+#ifndef TRIGGERS_H
+#define TRIGGERS_H
 
-#include "../PixelStrip.h"
+#include <Arduino.h>
+#include <ArduinoFFT.h>
 
-namespace FlashOnTrigger {
+// NOTE: SAMPLES and SAMPLING_FREQUENCY are now defined in the main .cpp file.
 
-inline void start(PixelStrip::Segment* seg, uint32_t baseColor, bool useRainbow, unsigned long flashInterval) {
-    seg->setEffect(PixelStrip::Segment::SegmentEffect::FLASH_TRIGGER);
-    seg->flashTriggerActive = true;
-    seg->flashUseRainbow = useRainbow;
-    seg->flashBaseColor = baseColor;
-    seg->flashLastUpdate = millis();
-    seg->flashInterval = flashInterval;
+using TriggerCallback = void (*)(bool isActive, uint8_t value);
 
-    if (!useRainbow) {
-        for (int i = seg->startIndex(); i <= seg->endIndex(); ++i) {
-            // --- CORRECTED LINE ---
-            // Set the initial color. Brightness will be applied by setPixel.
-            seg->getParent().setPixel(i, baseColor);
-        }
-        // REMOVED: seg->getParent().show(); - This should be called in your main loop.
+// The AudioTrigger class is now a "template". This allows it to create arrays
+// of a size that is defined in your main file, which is a more stable design.
+template<size_t SAMPLES>
+class AudioTrigger {
+public:
+    // UPDATED: The constructor now has the better-tuned values as its defaults.
+    AudioTrigger(int threshold = 35000, int peakMax = 200000, int minBrightness = 20)
+        : threshold_(threshold),
+          peakMax_(peakMax),
+          minBrightness_(minBrightness),
+          callback_(nullptr),
+          FFT() {}
+
+    // Method to register the callback function
+    void onTrigger(TriggerCallback cb) {
+        callback_ = cb;
     }
-}
 
-inline void stop(PixelStrip::Segment* seg) {
-    seg->flashTriggerActive = false;
-    seg->allOff();
-}
+    // The update function now takes the audio buffer as an argument.
+    void update(volatile int16_t sampleBuffer[]) {
+        if (!callback_) return;
 
-inline void update(PixelStrip::Segment* seg, bool trigger, uint8_t brightness) {
-    if (!seg->flashTriggerActive) return;
-
-    if (trigger) {
-        seg->setBrightness(brightness);  // Apply new brightness for this frame.
-
-        for (int i = seg->startIndex(); i <= seg->endIndex(); ++i) {
-            // Determine the color, either from the rainbow or the base color.
-            uint32_t color = seg->flashUseRainbow
-                ? seg->getParent().ColorHSV((i - seg->startIndex()) * 65536UL / (seg->endIndex() - seg->startIndex() + 1))
-                : seg->flashBaseColor;
-
-            // --- CORRECTED LINE ---
-            // Set the pixel color. Brightness is handled automatically.
-            seg->getParent().setPixel(i, color);
+        // Copy volatile PDM buffer to a local buffer for FFT processing
+        for(size_t i=0; i<SAMPLES; i++) {
+            vReal[i] = sampleBuffer[i];
+            vImag[i] = 0;
         }
 
-        // REMOVED: seg->getParent().show(); - This should be called in your main loop.
-    } else {
-        // If not triggered, turn the segment off.
-        seg->allOff();
+        // Perform FFT analysis
+        FFT.windowing(vReal, SAMPLES, FFT_WIN_TYP_HAMMING, FFT_FORWARD);
+        FFT.compute(vReal, vImag, SAMPLES, FFT_FORWARD);
+        FFT.complexToMagnitude(vReal, vImag, SAMPLES);
+
+        // Analyze the specific frequency bins that correspond to bass.
+        double bassMagnitude = 0;
+        for (int i = 1; i < 5; i++) { // Bins 1-4 cover the typical bass range
+            bassMagnitude += vReal[i];
+        }
+
+        // Print the detected magnitude for easy tuning of the threshold
+        Serial.print("Bass Magnitude: ");
+        Serial.println(bassMagnitude);
+
+        // If bass magnitude is over the threshold, fire the callback.
+        if (bassMagnitude > threshold_) {
+            int value = map(bassMagnitude, threshold_, peakMax_, minBrightness_, 255);
+            callback_(true, constrain(value, minBrightness_, 255));
+        } else {
+            callback_(false, 0);
+        }
     }
-}
 
-}
+    // Allows the threshold to be changed on the fly from main.cpp
+    void setThreshold(int newThreshold) {
+        threshold_ = newThreshold;
+    }
 
-#endif
+private:
+    int threshold_;
+    int peakMax_;
+    int minBrightness_;
+    TriggerCallback callback_;
+
+    // FFT-related variables
+    ArduinoFFT<double> FFT;
+    // These arrays now correctly use the template parameter for their size.
+    double vReal[SAMPLES];
+    double vImag[SAMPLES];
+};
+
+#endif // TRIGGERS_H

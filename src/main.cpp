@@ -1,67 +1,61 @@
 #include <Arduino.h>
 #include "PixelStrip.h"
-#include "effects/Effects.h"
-#include "Sensors.h"
-#include "Triggers.h" // <-- INCLUDE THE NEW MODULAR TRIGGER FILE
+#include "effects/Effects.h" // UPDATED: Use the single aggregate header
+#include "Triggers.h"      // Uses the version of Triggers.h with new defaults
+#include <PDM.h>           // The library for the onboard microphone
+
+// --- System-wide Audio Constants ---
+#define SAMPLES 256
+#define SAMPLING_FREQUENCY 16000
 
 // --- Pin and LED Definitions ---
 #define LED_PIN 4
 #define LED_COUNT 300
 #define BRIGHTNESS 25
 #define SEGMENTS 1
-#define MIC_PIN A0 // Define the analog pin for the microphone
+
+// --- PDM Audio Buffer ---
+volatile int16_t sampleBuffer[SAMPLES];
+volatile int samplesRead;
 
 // --- Global Objects ---
 PixelStrip strip(LED_PIN, LED_COUNT, BRIGHTNESS, SEGMENTS);
 PixelStrip::Segment *seg;
+// The AudioTrigger object is now created without arguments,
+// because it's using the new default values from Triggers.h.
+AudioTrigger<SAMPLES> audioTrigger; 
 
-// Create an instance of our new AudioTrigger.
-// We pass it the microphone instance, default mode, and the analog pin.
-AudioTrigger audioTrigger(Microphone::instance(), AudioTrigger::PEAK, MIC_PIN, 400, 1500, 20);
-
-// --- State Enums and Variables ---
+// --- State and Callback Functions ---
 enum EffectType { RAINBOW, SOLID, FLASH_TRIGGER, EFFECT_COUNT };
 EffectType currentEffect = RAINBOW;
+bool flashTriggerActive = false;
 
-// These global variables are still needed because the FlashOnTrigger effect reads them directly.
+// These are still needed by FlashOnTrigger.h
 bool flashTriggerState = false;
 uint8_t flashTriggerBrightness = 0;
-void setFlashTrigger(bool value, uint8_t brightness = 0)
-{
+void setFlashTrigger(bool value, uint8_t brightness = 0) {
   flashTriggerState = value;
   flashTriggerBrightness = brightness;
 }
 
-// --- CALLBACK FUNCTION ---
-// This is the specific action for the LEDs.
-// The AudioTrigger will call this function when a sound is detected.
+// This is the action that happens when the trigger fires.
 void ledFlashCallback(bool isActive, uint8_t brightness) {
     setFlashTrigger(isActive, brightness);
 }
 
-void applyEffect(EffectType effect, PixelStrip::Segment* targetSegment)
-{
+// This function now correctly enables/disables the audio trigger callback.
+void applyEffect(EffectType effect, PixelStrip::Segment* targetSegment) {
   if (!targetSegment) return;
   currentEffect = effect;
+  flashTriggerActive = (effect == FLASH_TRIGGER);
 
-  switch (effect)
-  {
-    case RAINBOW:
-      // When switching to a non-trigger effect, disable the audio trigger.
-      audioTrigger.onTrigger(nullptr); 
-      RainbowChase::start(targetSegment, 30, 50);
-      break;
-    case SOLID:
-      audioTrigger.onTrigger(nullptr);
-      SolidColor::start(targetSegment, strip.Color(0, 255, 0), 50);
-      break;
-    case FLASH_TRIGGER:
-      // When we select this effect, we also tell the trigger
-      // to use our LED callback function. The specific mode (PEAK vs BASS)
-      // is set by the serial command.
+  if (flashTriggerActive) {
       audioTrigger.onTrigger(ledFlashCallback);
       FlashOnTrigger::start(targetSegment, strip.Color(0, 0, 255), false, 100);
-      break;
+  } else {
+      audioTrigger.onTrigger(nullptr); // Disable trigger for other effects
+      if (effect == RAINBOW) RainbowChase::start(targetSegment, 30, 50);
+      else if (effect == SOLID) SolidColor::start(targetSegment, strip.Color(0, 255, 0), 50);
   }
 }
 
@@ -71,41 +65,37 @@ void handleSerial() {
         cmd.trim();
         cmd.toLowerCase();
 
-        if (cmd == "micflash") {
-            Serial.println(">>> Trigger Mode: PEAK volume");
-            Microphone::instance().begin(); // Needed for peak detection
-            audioTrigger.setDetectionMode(AudioTrigger::PEAK);
-            // You can adjust the threshold for peak detection here
-            audioTrigger.setThreshold(400); 
+        if (cmd == "bassflash") {
+            Serial.println(">>> Trigger Mode: BASS (Onboard Mic)");
+            // You can still override the default threshold for testing if needed:
+            // audioTrigger.setThreshold(50000); 
             applyEffect(FLASH_TRIGGER, seg);
-        } 
-        else if (cmd == "bassflash") {
-            Serial.println(">>> Trigger Mode: BASS frequency");
-            audioTrigger.setDetectionMode(AudioTrigger::BASS);
-            // Bass detection often requires a different threshold. Tune this value.
-            audioTrigger.setThreshold(1500); 
-            applyEffect(FLASH_TRIGGER, seg);
+        } else if (cmd == "stop") {
+             applyEffect(RAINBOW, seg); // Switch to a default, non-trigger effect
         }
-        else if (cmd == "micstop") {
-            Serial.println(">>> Disabling Audio Trigger");
-            applyEffect(RAINBOW, seg); // Switches to a default effect, which also disables the trigger
-        }
-        else if (cmd == "next" || cmd == "rainbow" || cmd == "solid") {
-             // Handle other commands to switch effects
-            if (cmd == "next") currentEffect = static_cast<EffectType>((currentEffect + 1) % EFFECT_COUNT);
-            if (cmd == "rainbow") currentEffect = RAINBOW;
-            if (cmd == "solid") currentEffect = SOLID;
-            applyEffect(currentEffect, seg);
-        }
+        // Add other commands here...
     }
 }
 
+// This is the PDM library's callback function.
+void onPDMdata() {
+  int bytesAvailable = PDM.available();
+  PDM.read((int16_t*)sampleBuffer, bytesAvailable);
+  samplesRead = bytesAvailable / 2; // Set the flag that new data is ready
+}
 
-void setup()
-{
+void setup() {
   Serial.begin(115200);
   while (!Serial);
 
+  // --- Initialize Onboard Microphone ---
+  PDM.onReceive(onPDMdata);
+  if (!PDM.begin(1, SAMPLING_FREQUENCY)) {
+    Serial.println("Failed to start PDM!");
+    while (1); // Halt if microphone fails
+  }
+  
+  // --- Initialize LED Strip ---
   strip.begin();
   if (strip.getSegments().size() > 1) {
       seg = strip.getSegments()[1];
@@ -117,19 +107,14 @@ void setup()
   applyEffect(currentEffect, seg);
 }
 
-
 void loop() {
   handleSerial();
-
-  // --- Simplified Main Loop ---
-  // 1. Check for trigger events. If a callback is registered, it will be called.
-  audioTrigger.update();
-
-  // 2. Update the LED strip based on the current state.
-  seg->update();
-
-  // 3. Show the result.
-  strip.show();
   
-  delay(5); 
+  if (flashTriggerActive && samplesRead > 0) {
+    audioTrigger.update(sampleBuffer);
+    samplesRead = 0; 
+  }
+
+  seg->update();
+  strip.show();
 }
