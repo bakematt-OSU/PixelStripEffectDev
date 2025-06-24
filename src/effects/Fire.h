@@ -5,7 +5,7 @@
 
 namespace Fire {
 
-// --- Helper functions to replace missing FastLED functions ---
+// --- ADDED: Helper functions to replace missing library functions ---
 
 // qadd8: Adds two bytes with saturation at 255.
 inline byte qadd8(byte a, byte b) {
@@ -24,9 +24,8 @@ inline byte qsub8(byte a, byte b) {
     return a - b;
 }
 
+
 // --- Effect-specific constants you can tweak ---
-const int COOLING = 55;   // How fast the fire cools down. Less cooling = taller flames. (0-100)
-const int SPARKING = 120; // Chance of new sparks. Higher value = more intense fire. (0-255)
 const int MAX_LEDS = 300; // Must be at least as large as your LED_COUNT
 
 // Internal state array for the heat of each pixel
@@ -50,7 +49,15 @@ inline void start(PixelStrip::Segment* seg, uint32_t color1, uint32_t color2) {
     seg->setEffect(PixelStrip::Segment::SegmentEffect::FIRE);
     seg->active = true;
     seg->interval = (color1 > 0) ? color1 : 15; // Default to 15ms delay
-    seg->lastUpdate = millis();
+
+    // If a value for Sparking was passed, use it. Otherwise, keep the default.
+    if (color1 > 0 && color1 <= 255) {
+        seg->fireSparking = color1;
+    }
+    // If a value for Cooling was passed, use it. Otherwise, keep the default.
+    if (color2 > 0 && color2 <= 100) {
+        seg->fireCooling = color2;
+    }
 }
 
 inline void update(PixelStrip::Segment* seg) {
@@ -65,8 +72,7 @@ inline void update(PixelStrip::Segment* seg) {
 
     // Step 1. Cool down every cell a little
     for (int i = start; i <= end; i++) {
-      // UPDATED: Replaced random8 and qsub8
-      heat[i] = qsub8(heat[i], random(0, ((COOLING * 10) / len) + 2));
+      heat[i] = qsub8(heat[i], random(0, ((seg->fireCooling * 10) / len) + 2));
     }
   
     // Step 2. Heat from each cell drifts 'up' and diffuses a little
@@ -75,10 +81,8 @@ inline void update(PixelStrip::Segment* seg) {
     }
     
     // Step 3. Randomly ignite new 'sparks' of heat at the bottom
-    // UPDATED: Replaced random8
-    if (random(255) < SPARKING) {
+    if (random(255) < seg->fireSparking) {
       int y = start + random(7);
-      // UPDATED: Replaced qadd8 and random8
       heat[y] = qadd8(heat[y], random(160, 255));
     }
 

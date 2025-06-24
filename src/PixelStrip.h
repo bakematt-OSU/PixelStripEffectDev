@@ -12,6 +12,7 @@ class PixelStrip
 {
 public:
     void clearUserSegments();
+    void propagateTriggerState(bool isActive, uint8_t brightness);
 
     class Segment
     {
@@ -49,7 +50,6 @@ public:
         PixelStrip &getParent() { return parent; }
 
         // --- UNIFIED STATE VARIABLES ---
-        // These are used by all effects.
         bool active = false;
         uint32_t baseColor = 0;
         unsigned long lastUpdate = 0;
@@ -59,11 +59,13 @@ public:
         bool triggerIsActive = false;
         uint8_t triggerBrightness = 0;
 
-        // State unique to specific effects
-        // RainbowCycle and RainbowChase use this for hue
+        // --- State unique to specific effects ---
         unsigned long rainbowFirstPixelHue = 0;
-        // chaseOffset is used in TheaterChase
         uint8_t chaseOffset = 0;
+
+        // ADDED: Configurable parameters for the Fire effect
+        uint8_t fireSparking = 120; // Default value: 120
+        uint8_t fireCooling = 55;   // Default value: 55
 
     private:
         PixelStrip &parent;

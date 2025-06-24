@@ -48,8 +48,8 @@ public:
         }
 
         // Print the detected magnitude for easy tuning of the threshold
-        Serial.print("Bass Magnitude: ");
-        Serial.println(bassMagnitude);
+        // Serial.print("Bass Magnitude: ");
+        // Serial.println(bassMagnitude);
 
         // If bass magnitude is over the threshold, fire the callback.
         if (bassMagnitude > threshold_) {
