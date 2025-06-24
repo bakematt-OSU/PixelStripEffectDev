@@ -8,6 +8,8 @@
         "PINMAP",
         "RAINBOWCHASE",
         "raspberrypi",
-        "SERIALCONTROLLER"
+        "SERIALCONTROLLER",
+        "triggeroff",
+        "triggeron"
     ]
 }

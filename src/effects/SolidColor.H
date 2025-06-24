@@ -6,6 +6,7 @@
 namespace SolidColor{
 
 inline void start(PixelStrip::Segment* seg, uint32_t color, uint8_t brightness = 255) {
+    seg->setEffect(PixelStrip::Segment::SegmentEffect::SOLID);
     seg->setBrightness(brightness);
     seg->allOnColor = color;
     seg->allOnActive = true;

@@ -1,72 +1,191 @@
 #include <Arduino.h>
 #include "PixelStrip.h"
 #include "effects/Effects.h"
+#include "Sensors.h"
 
-#define LED_PIN    4
-#define LED_COUNT  300
+#define LED_PIN 4
+#define LED_COUNT 300
 #define BRIGHTNESS 25
-#define SEGMENTS   1
+#define SEGMENTS 1
+#define TRIGGER_PIN 2 // 🔸 Example digital pin for trigger input
 
 PixelStrip strip(LED_PIN, LED_COUNT, BRIGHTNESS, SEGMENTS);
-PixelStrip::Segment* seg;
+PixelStrip::Segment *seg;
+// Microphone mic(400);
 
-enum EffectType {
+enum EffectType
+{
   RAINBOW,
   SOLID,
+  FLASH_TRIGGER,
   EFFECT_COUNT
 };
 
 EffectType currentEffect = RAINBOW;
 
-void applyEffect(EffectType effect) {
-  // Stop all effects
-  RainbowChase::stop(seg);
-  SolidColor::stop(seg);
+bool flashTriggerState = false;
+uint8_t flashTriggerBrightness = 0;
+void setFlashTrigger(bool value, uint8_t brightness = 0)
+{
+  flashTriggerState = value;
+  flashTriggerBrightness = brightness;
+}
 
-  seg->clear();
+void applyEffect(EffectType effect)
+{
   currentEffect = effect;
 
-  switch (effect) {
-    case RAINBOW:
-      RainbowChase::start(seg, 30, 175);
-      break;
-    case SOLID:
-      SolidColor::start(seg, strip.Color(0, 255, 0), 200);
-      break;
-    default:
-      break;
+  switch (effect)
+  {
+  case RAINBOW:
+    RainbowChase::start(seg, 30, 50);
+    break;
+
+  case SOLID:
+    SolidColor::start(seg, strip.Color(0, 255, 0), 50);
+    break;
+
+  case FLASH_TRIGGER:
+    FlashOnTrigger::start(seg, strip.Color(0, 0, 255), false, 100);
+    break;
+
+  default:
+    break;
   }
 }
 
-void handleSerial() {
-  if (Serial.available()) {
+void handleSerial()
+{
+  if (Serial.available())
+  {
     String cmd = Serial.readStringUntil('\n');
     cmd.trim();
     cmd.toLowerCase();
 
-    if (cmd == "next") {
+    if (cmd == "next")
+    {
       currentEffect = static_cast<EffectType>((currentEffect + 1) % EFFECT_COUNT);
       applyEffect(currentEffect);
-    } else if (cmd == "rainbow") {
+    }
+    else if (cmd == "rainbow")
       applyEffect(RAINBOW);
-    } else if (cmd == "solid") {
+    else if (cmd == "solid")
       applyEffect(SOLID);
-    } else {
-      Serial.println("Unknown command. Try 'next', 'rainbow', or 'solid'.");
+    else if (cmd == "micflash")
+    {
+      Serial.println(">>> micflash: beginning mic");
+      // mic.begin(); // ← might freeze here
+      Microphone::instance().begin();
+      Microphone::instance().setThreshold(400);
+      Serial.println(">>> micflash: mic started");
+      applyEffect(FLASH_TRIGGER);
+    }
+    else if (cmd.startsWith("micflash "))
+    {
+      int threshold = cmd.substring(9).toInt();
+      Serial.print("Setting mic threshold to: ");
+      Serial.println(threshold);
+      Microphone::instance().setThreshold(threshold); // ✅ updated
+      applyEffect(FLASH_TRIGGER);
+    }
+    else if (cmd == "micstop")
+    {
+      Serial.println("Stopping microphone");
+      Microphone::instance().stop();
+      applyEffect(RAINBOW); // Reset to rainbow effect
+    }
+    else if (cmd.startsWith("triggeron "))
+    {
+      int val = cmd.substring(10).toInt();
+      setFlashTrigger(true, constrain(val, 0, 255));
+    }
+    else if (cmd == "triggeron")
+    {
+      setFlashTrigger(true, 128); // default brightness
+    }
+    else if (cmd == "triggeroff")
+    {
+      setFlashTrigger(false);
+    }
+    else
+      Serial.println("Unknown command. Try 'next', 'rainbow', 'solid', or 'micflash'.");
+  }
+}
+
+void updateFlashTriggerFromMic(int threshold, int peakMax, int minBrightness = 20)
+{
+  Microphone &mic = Microphone::instance();
+  if (mic.available())
+  {
+    int peak = mic.readPeak();
+    Serial.print("[Mic] Peak = ");
+    Serial.println(peak);
+
+    if (peak >= threshold)
+    {
+      // Map peak amplitude to brightness (minBrightness–255)
+      int brightness = map(peak, threshold, peakMax, minBrightness, 255);
+      brightness = constrain(brightness, minBrightness, 255);
+
+      Serial.print("→ Triggering at brightness: ");
+      Serial.println(brightness);
+
+      setFlashTrigger(true, brightness);
+    }
+    else
+    {
+      setFlashTrigger(false);
     }
   }
 }
 
-void setup() {
+void setup()
+{
   Serial.begin(115200);
-  while (!Serial);
+  while (!Serial)
+    ; // wait for USB
+
+  pinMode(TRIGGER_PIN, INPUT); // 🔸 Set up trigger input pin
+
   strip.begin();
   seg = strip.getSegments()[1];
   seg->begin();
+
   applyEffect(currentEffect);
 }
 
+// void loop()
+// {
+//   static unsigned long lastBeat = 0;
+//   if (millis() - lastBeat > 1000)
+//   {
+//     Serial.println("[Loop] alive");
+//     lastBeat = millis();
+//   }
+
+//   handleSerial();
+
+//   if (currentEffect == FLASH_TRIGGER)
+//   {
+//     updateFlashTriggerFromMic(400, 1500);
+//   }
+
+//   seg->update();
+// }
+
 void loop() {
+  static unsigned long lastBeat = 0;
+  if (millis() - lastBeat > 1000) {
+    Serial.println("[Loop] alive");
+    lastBeat = millis();
+  }
+
   handleSerial();
+
+  if (currentEffect == FLASH_TRIGGER) {
+    updateFlashTriggerFromMic(400, 1500);
+  }
+
   seg->update();
+  delay(5);  // Add to reduce CPU saturation
 }

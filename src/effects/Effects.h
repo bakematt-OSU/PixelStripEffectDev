@@ -3,5 +3,7 @@
 
 #include "RainbowChase.h"
 #include "SolidColor.h"
+#include "FlashOnTrigger.h"
+
 
 #endif

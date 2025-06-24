@@ -6,6 +6,7 @@
 namespace RainbowChase {
 
 inline void start(PixelStrip::Segment* seg, unsigned long frameDelay, uint8_t brightness) {
+    seg->setEffect(PixelStrip::Segment::SegmentEffect::RAINBOW);
     seg->rainbowDelay = frameDelay;
     seg->rainbowLastUpdate = millis();
     seg->rainbowFirstPixelHue = 0;
@@ -23,7 +24,7 @@ inline void update(PixelStrip::Segment* seg) {
 
     for (int i = seg->startIndex(); i <= seg->endIndex(); ++i) {
         int pixelHue = seg->rainbowFirstPixelHue + ((i - seg->startIndex()) * 65536L / (seg->endIndex() - seg->startIndex() + 1));
-        seg->getParent().setPixel(i, seg->getParent().getStrip().ColorHSV(pixelHue));
+        seg->getParent().setPixel(i, seg->getParent().ColorHSV(pixelHue));
     }
     seg->getParent().show();
 
