@@ -13,6 +13,10 @@
 #define LED_COUNT 300
 #define BRIGHTNESS 25
 #define SEGMENTS 1
+// Add these variables near the top of your main.cpp
+uint8_t bassR = 128;
+uint8_t bassG = 0;
+uint8_t bassB = 128; // Default to blue
 
 // --- PDM Audio Buffer ---
 volatile int16_t sampleBuffer[SAMPLES];
@@ -43,7 +47,7 @@ void ledFlashCallback(bool isActive, uint8_t brightness) {
     setFlashTrigger(isActive, brightness);
 }
 
-// This function now correctly enables/disables the audio trigger callback.
+// Replace your existing applyEffect function with this version
 void applyEffect(EffectType effect, PixelStrip::Segment* targetSegment) {
   if (!targetSegment) return;
   currentEffect = effect;
@@ -51,7 +55,8 @@ void applyEffect(EffectType effect, PixelStrip::Segment* targetSegment) {
 
   if (flashTriggerActive) {
       audioTrigger.onTrigger(ledFlashCallback);
-      FlashOnTrigger::start(targetSegment, strip.Color(0, 0, 255), false, 100);
+      // UPDATED: Now uses the global variables for color
+      FlashOnTrigger::start(targetSegment, strip.Color(bassR, bassG, bassB), false, 100);
   } else {
       audioTrigger.onTrigger(nullptr); // Disable trigger for other effects
       if (effect == RAINBOW) RainbowChase::start(targetSegment, 30, 50);
@@ -59,24 +64,62 @@ void applyEffect(EffectType effect, PixelStrip::Segment* targetSegment) {
   }
 }
 
+// Replace your existing handleSerial function with this version
 void handleSerial() {
     if (Serial.available()) {
         String cmd = Serial.readStringUntil('\n');
         cmd.trim();
         cmd.toLowerCase();
 
-        if (cmd == "bassflash") {
+        // NEW: Logic to handle the "setcolor" command
+        if (cmd.startsWith("setcolor")) {
+            // Example command: "setcolor 255 0 0" for red
+            int firstSpace = cmd.indexOf(' ');
+            if (firstSpace != -1) {
+                int secondSpace = cmd.indexOf(' ', firstSpace + 1);
+                int thirdSpace = cmd.indexOf(' ', secondSpace + 1);
+
+                if (secondSpace != -1 && thirdSpace != -1) {
+                    String r_str = cmd.substring(firstSpace + 1, secondSpace);
+                    String g_str = cmd.substring(secondSpace + 1, thirdSpace);
+                    String b_str = cmd.substring(thirdSpace + 1);
+
+                    bassR = r_str.toInt();
+                    bassG = g_str.toInt();
+                    bassB = b_str.toInt();
+                    
+                    Serial.print("New bass flash color set to R: ");
+                    Serial.print(bassR);
+                    Serial.print(", G: ");
+                    Serial.print(bassG);
+                    Serial.print(", B: ");
+                    Serial.println(bassB);
+
+                    // If in bass flash mode, re-apply the effect to show the new color immediately
+                    if (currentEffect == FLASH_TRIGGER) {
+                        applyEffect(FLASH_TRIGGER, seg);
+                    }
+                } else {
+                     Serial.println("Invalid format. Use: setcolor <r> <g> <b>");
+                }
+            } else {
+                Serial.println("Invalid format. Use: setcolor <r> <g> <b>");
+            }
+        }
+        else if (cmd == "bassflash") {
             Serial.println(">>> Trigger Mode: BASS (Onboard Mic)");
-            // You can still override the default threshold for testing if needed:
-            // audioTrigger.setThreshold(50000); 
             applyEffect(FLASH_TRIGGER, seg);
         } else if (cmd == "stop") {
              applyEffect(RAINBOW, seg); // Switch to a default, non-trigger effect
         }
-        // Add other commands here...
+        else if (cmd == "next" || cmd == "rainbow" || cmd == "solid") {
+            if (cmd == "next") currentEffect = static_cast<EffectType>((currentEffect + 1) % EFFECT_COUNT);
+            if (cmd == "rainbow") currentEffect = RAINBOW;
+            if (cmd == "solid") currentEffect = SOLID;
+            applyEffect(currentEffect, seg);
+        }
     }
 }
-
 // This is the PDM library's callback function.
 void onPDMdata() {
   int bytesAvailable = PDM.available();
