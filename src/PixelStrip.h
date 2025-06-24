@@ -11,6 +11,8 @@ using PixelBus = NeoPixelBus<NeoGrbFeature, Neo800KbpsMethod>;
 class PixelStrip
 {
 public:
+    void clearUserSegments();
+
     class Segment
     {
     public:

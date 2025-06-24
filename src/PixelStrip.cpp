@@ -156,3 +156,14 @@ void PixelStrip::Segment::update()
         break;
     }
 }
+
+// In PixelStrip.cpp
+void PixelStrip::clearUserSegments() {
+    // We start at index 1 to preserve the default "all" segment at index 0
+    if (segments_.size() <= 1) return;
+
+    for (size_t i = 1; i < segments_.size(); ++i) {
+        delete segments_[i]; // Free the memory for each segment
+    }
+    segments_.resize(1); // Shrink the vector back to only contain the "all" segment
+}

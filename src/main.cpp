@@ -11,10 +11,8 @@
 #define LED_PIN 4
 #define LED_COUNT 300
 #define BRIGHTNESS 25
-
-// UPDATED: Set the number of segments you want the strip divided into.
-// This will create segments [1], [2], [3], and [4]. Segment [0] is always the whole strip.
-#define SEGMENTS 4
+// Set to 0 to disable automatic segment division and allow for manual creation
+#define SEGMENTS 0
 
 // --- Bass Flash Color ---
 uint8_t bassR = 128;
@@ -28,12 +26,12 @@ volatile int samplesRead;
 // --- Global Objects ---
 PixelStrip strip(LED_PIN, LED_COUNT, BRIGHTNESS, SEGMENTS);
 
-// This pointer will now refer to the "currently selected" segment for commands.
+// This pointer refers to the "currently selected" segment for commands.
 PixelStrip::Segment *seg;
 
 AudioTrigger<SAMPLES> audioTrigger; 
 
-// The callback now calls the method on the currently selected segment object.
+// The callback calls the method on the currently selected segment object.
 void ledFlashCallback(bool isActive, uint8_t brightness) {
     if (seg) {
         seg->setTriggerState(isActive, brightness);
@@ -46,13 +44,44 @@ void handleSerial() {
         cmd.trim();
         cmd.toLowerCase();
 
-        // ADDED: New command to select the active segment
-        if (cmd.startsWith("select")) {
-            // Example: "select 1"
-            int segmentIndex = cmd.substring(7).toInt(); // Get number after "select "
-            
-            // Segments start at index 1. Index 0 is the whole strip.
-            if (segmentIndex > 0 && segmentIndex < strip.getSegments().size()) {
+        // --- NEW: Dynamic Segment Commands ---
+        if (cmd == "clearsegments") {
+            Serial.println("Clearing all user-defined segments...");
+            strip.clearUserSegments();
+            seg = strip.getSegments()[0]; // Default back to the 'all' segment
+            seg->startEffect(PixelStrip::Segment::SegmentEffect::NONE);
+            Serial.println("Active segment is now 0 (full strip).");
+        }
+        else if (cmd.startsWith("addsegment")) {
+            // Example command: "addsegment 0 99"
+            int firstSpace = cmd.indexOf(' ');
+            if (firstSpace != -1) {
+                int secondSpace = cmd.indexOf(' ', firstSpace + 1);
+                if (secondSpace != -1) {
+                    int start = cmd.substring(firstSpace + 1, secondSpace).toInt();
+                    int end = cmd.substring(secondSpace + 1).toInt();
+
+                    if (end >= start) {
+                        String name = "seg" + String(strip.getSegments().size());
+                        strip.addSection(start, end, name);
+                        Serial.print("Added new segment (index ");
+                        Serial.print(strip.getSegments().size() - 1);
+                        Serial.print(") from pixel ");
+                        Serial.print(start);
+                        Serial.print(" to ");
+                        Serial.println(end);
+                    } else {
+                        Serial.println("Error: End pixel must be >= start pixel.");
+                    }
+                } else {
+                    Serial.println("Invalid format. Use: addsegment <start> <end>");
+                }
+            }
+        }
+        // --- Effect Control Commands ---
+        else if (cmd.startsWith("select")) {
+            int segmentIndex = cmd.substring(7).toInt();
+            if (segmentIndex >= 0 && segmentIndex < strip.getSegments().size()) {
                  seg = strip.getSegments()[segmentIndex];
                  Serial.print("Segment ");
                  Serial.print(segmentIndex);
@@ -70,7 +99,7 @@ void handleSerial() {
                     bassR = cmd.substring(firstSpace + 1, secondSpace).toInt();
                     bassG = cmd.substring(secondSpace + 1, thirdSpace).toInt();
                     bassB = cmd.substring(thirdSpace + 1).toInt();
-                    Serial.println("Color set. Re-enable bassflash on a segment to see the change.");
+                    Serial.println("Bass flash color set. Re-enable bassflash on a segment to see the change.");
                 }
             }
         }
@@ -116,7 +145,6 @@ void handleSerial() {
                  audioTrigger.onTrigger(ledFlashCallback);
             }
             
-            // Start the next effect on the currently selected segment
             switch(next_effect) {
                 case PixelStrip::Segment::SegmentEffect::SOLID:
                     seg->startEffect(next_effect, strip.Color(0, 255, 0));
@@ -133,7 +161,7 @@ void handleSerial() {
                 case PixelStrip::Segment::SegmentEffect::FIRE:
                     seg->startEffect(next_effect, 20);
                     break;
-                default: // RAINBOW and any other case
+                default:
                     seg->startEffect(next_effect);
                     break;
             }
@@ -159,23 +187,11 @@ void setup() {
   
   strip.begin();
   
-  // Set the default active segment to the first user-defined segment
-  if (strip.getSegments().size() > 1) {
-      seg = strip.getSegments()[1];
-  } else {
-      seg = strip.getSegments()[0]; 
-  }
-  
-  // Start all segments with a default effect
-  for (auto* segment : strip.getSegments()) {
-      segment->begin();
-      // Start segment 0 (full strip) with nothing, and all others with rainbow
-      if (segment->getId() == 0) {
-          segment->startEffect(PixelStrip::Segment::SegmentEffect::NONE);
-      } else {
-          segment->startEffect(PixelStrip::Segment::SegmentEffect::RAINBOW);
-      }
-  }
+  // Set the default active segment to the main segment (index 0), which is the whole strip.
+  // Use the new terminal commands to add more segments.
+  seg = strip.getSegments()[0]; 
+  seg->begin();
+  seg->startEffect(PixelStrip::Segment::SegmentEffect::NONE);
 }
 
 void loop() {
@@ -186,8 +202,7 @@ void loop() {
     samplesRead = 0; 
   }
 
-  // UPDATED: Loop through all segments and call update() on each one.
-  // This allows all effects to run simultaneously.
+  // Loop through all segments and call update() on each one.
   for (auto* s : strip.getSegments()) {
     s->update();
   }
