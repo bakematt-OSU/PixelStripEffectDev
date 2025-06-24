@@ -2,15 +2,10 @@
 #define PIXELSTRIP_H
 
 #include <Arduino.h>
-#include <NeoPixelBus.h> // The non-blocking library
+#include <NeoPixelBus.h> 
 #include <vector>
 
-// --- IMPORTANT ---
-// Configure the NeoPixelBus features for your specific hardware and LED strip.
-// This example uses NeoGrbFeature for standard GRB strips like WS2812B.
-// For SK6812 RGBW strips, you might use: NeoPixelBus<NeoRgbwFeature, Neo800KbpsMethod>
 using PixelBus = NeoPixelBus<NeoGrbFeature, Neo800KbpsMethod>;
-
 
 class PixelStrip
 {
@@ -18,7 +13,6 @@ public:
     class Segment
     {
     public:
-        // EFFECT ENUM TYPE FOR TRACKING ACTIVE EFFECT
         enum class SegmentEffect
         {
             NONE,
@@ -26,47 +20,41 @@ public:
             SOLID,
             FLASH_TRIGGER
         };
-        // CONSTRUCTOR
+
         Segment(PixelStrip &parent, uint16_t startIdx, uint16_t endIdx, const String &name, uint8_t id);
 
-        // --- State ---
         uint16_t startIndex() const { return startIdx; }
         uint16_t endIndex() const { return endIdx; }
         String getName() const;
         uint8_t getId() const;
         SegmentEffect activeEffect = SegmentEffect::NONE;
 
-        // --- Methods ---
         void begin();
         void update();
-        void allOn(uint32_t color);
         void allOff();
         inline void clear() { allOff(); }
+        
+        // OLD METHOD (we will still use it internally)
         void setEffect(SegmentEffect effect);
+        
+        // ADDED: New primary method for starting effects
+        void startEffect(SegmentEffect effect, uint32_t color1 = 0, uint32_t color2 = 0);
+
         void setBrightness(uint8_t b);
         uint8_t getBrightness() const;
-
-        // Access parent PixelStrip
+        
         PixelStrip &getParent() { return parent; }
 
-        // --- Effect-specific state variables ---
-        // RainbowChase state
-        unsigned long rainbowDelay = 0;
-        unsigned long rainbowLastUpdate = 0;
-        unsigned long rainbowFirstPixelHue = 0;
+        // Effect-specific state variables
+        unsigned long rainbowDelay, rainbowLastUpdate, rainbowFirstPixelHue;
         bool rainbowActive = false;
-
-        // SolidColorEffect state
         bool allOnActive = false;
         uint32_t allOnColor = 0;
-
-        // FlashOnTrigger state
         bool flashTriggerActive = false;
         bool flashUseRainbow = false;
         bool flashToggle = false;
         uint32_t flashBaseColor = 0;
-        unsigned long flashInterval = 100;
-        unsigned long flashLastUpdate = 0;
+        unsigned long flashInterval, flashLastUpdate;
 
     private:
         PixelStrip &parent;
@@ -87,21 +75,15 @@ public:
     void setPixel(uint16_t idx, uint32_t color);
     void clearPixel(uint16_t idx);
 
-    // Helper to set brightness context for pixel operations
     void setActiveBrightness(uint8_t b) { activeBrightness_ = b; }
-
     const std::vector<Segment *> &getSegments() const { return segments_; }
-    // Return type is now the configured PixelBus type
     PixelBus &getStrip() { return strip; }
     void addSection(uint16_t start, uint16_t end, const String &name);
 
 private:
-    // Adafruit_NeoPixel replaced with the templated NeoPixelBus
     PixelBus strip;
     std::vector<Segment *> segments_;
-    
-    // Stores the brightness for the current segment being updated
-    uint8_t activeBrightness_ = 255;
+    uint8_t activeBrightness_ = 128;
 };
 
 #endif // PIXELSTRIP_H
