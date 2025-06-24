@@ -391,7 +391,7 @@ int Microphone::readPeak()
             peak = v;
     }
     _samplesRead = 0;
-    DBG.print("Mic", 2,
+    DBG.print("Mic", 3,
               String("Peak amplitude = ") + String(peak));
     return peak;
 }

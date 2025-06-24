@@ -11,7 +11,7 @@
 
 PixelStrip strip(LED_PIN, LED_COUNT, BRIGHTNESS, SEGMENTS);
 PixelStrip::Segment *seg;
-// Microphone mic(400);
+// Microphone mic(400); // This line is commented out, assuming you use the singleton Microphone::instance()
 
 enum EffectType
 {
@@ -31,22 +31,23 @@ void setFlashTrigger(bool value, uint8_t brightness = 0)
   flashTriggerBrightness = brightness;
 }
 
-void applyEffect(EffectType effect)
+void applyEffect(EffectType effect, PixelStrip::Segment* targetSegment)
 {
+  if (!targetSegment) return; // Safety check
   currentEffect = effect;
 
   switch (effect)
   {
   case RAINBOW:
-    RainbowChase::start(seg, 30, 50);
+    RainbowChase::start(targetSegment, 30, 50);
     break;
 
   case SOLID:
-    SolidColor::start(seg, strip.Color(0, 255, 0), 50);
+    SolidColor::start(targetSegment, strip.Color(0, 255, 0), 50);
     break;
 
   case FLASH_TRIGGER:
-    FlashOnTrigger::start(seg, strip.Color(0, 0, 255), false, 100);
+    FlashOnTrigger::start(targetSegment, strip.Color(0, 0, 255), false, 100);
     break;
 
   default:
@@ -65,34 +66,33 @@ void handleSerial()
     if (cmd == "next")
     {
       currentEffect = static_cast<EffectType>((currentEffect + 1) % EFFECT_COUNT);
-      applyEffect(currentEffect);
+      applyEffect(currentEffect, seg);
     }
     else if (cmd == "rainbow")
-      applyEffect(RAINBOW);
+      applyEffect(RAINBOW, seg);
     else if (cmd == "solid")
-      applyEffect(SOLID);
+      applyEffect(SOLID, seg);
     else if (cmd == "micflash")
     {
       Serial.println(">>> micflash: beginning mic");
-      // mic.begin(); // ← might freeze here
       Microphone::instance().begin();
-      Microphone::instance().setThreshold(400);
+      Microphone::instance().setThreshold(400); // Default threshold
       Serial.println(">>> micflash: mic started");
-      applyEffect(FLASH_TRIGGER);
+      applyEffect(FLASH_TRIGGER, seg);
     }
     else if (cmd.startsWith("micflash "))
     {
       int threshold = cmd.substring(9).toInt();
       Serial.print("Setting mic threshold to: ");
       Serial.println(threshold);
-      Microphone::instance().setThreshold(threshold); // ✅ updated
-      applyEffect(FLASH_TRIGGER);
+      Microphone::instance().setThreshold(threshold);
+      applyEffect(FLASH_TRIGGER, seg);
     }
     else if (cmd == "micstop")
     {
       Serial.println("Stopping microphone");
       Microphone::instance().stop();
-      applyEffect(RAINBOW); // Reset to rainbow effect
+      applyEffect(RAINBOW, seg); // Reset to a default effect
     }
     else if (cmd.startsWith("triggeron "))
     {
@@ -112,14 +112,15 @@ void handleSerial()
   }
 }
 
+// REVERTED: This function now calculates brightness based on volume.
 void updateFlashTriggerFromMic(int threshold, int peakMax, int minBrightness = 20)
 {
   Microphone &mic = Microphone::instance();
   if (mic.available())
   {
     int peak = mic.readPeak();
-    Serial.print("[Mic] Peak = ");
-    Serial.println(peak);
+    // Uncomment the line below for debugging microphone values
+    // Serial.print("[Mic] Peak = "); Serial.println(peak);
 
     if (peak >= threshold)
     {
@@ -127,8 +128,8 @@ void updateFlashTriggerFromMic(int threshold, int peakMax, int minBrightness = 2
       int brightness = map(peak, threshold, peakMax, minBrightness, 255);
       brightness = constrain(brightness, minBrightness, 255);
 
-      Serial.print("→ Triggering at brightness: ");
-      Serial.println(brightness);
+      // Uncomment for debugging trigger events
+      // Serial.print("→ Triggering at brightness: "); Serial.println(brightness);
 
       setFlashTrigger(true, brightness);
     }
@@ -145,39 +146,45 @@ void setup()
   while (!Serial)
     ; // wait for USB
 
-  pinMode(TRIGGER_PIN, INPUT); // 🔸 Set up trigger input pin
+  pinMode(TRIGGER_PIN, INPUT);
 
   strip.begin();
-  seg = strip.getSegments()[1];
+  
+  // Correctly get the first user-defined segment (index 1)
+  if (strip.getSegments().size() > 1) {
+      seg = strip.getSegments()[1];
+  } else {
+      // Fallback to the 'all' segment if no others exist
+      seg = strip.getSegments()[0]; 
+  }
   seg->begin();
 
-  applyEffect(currentEffect);
+  applyEffect(currentEffect, seg);
 }
 
 
 void loop() {
   static unsigned long lastBeat = 0;
   if (millis() - lastBeat > 1000) {
-    Serial.println("[Loop] alive");
+    // A simple heartbeat to know the loop is running
+    // Serial.println("[Loop] alive");
     lastBeat = millis();
   }
 
-  // Handle any user input
   handleSerial();
 
-  // If the current effect is flash, check the microphone
+  // If the current effect is flash, check the microphone peak volume
   if (currentEffect == FLASH_TRIGGER) {
-    updateFlashTriggerFromMic(400, 1500);
+    // REVERTED: Call the function with all parameters for variable brightness.
+    // Adjust these values to tune the sensitivity.
+    // updateFlashTriggerFromMic(threshold, peak_max, min_brightness)
+    updateFlashTriggerFromMic(2000, 15000, 20); 
   }
 
-  // Update the color data in the memory buffer based on the active effect
+  // Update segment state and push to strip
   seg->update();
-  
-  // --- THIS IS THE CORRECT PLACE ---
-  // Push the updated color data to the physical LED strip.
   strip.show();
 
-//   // The delay is likely no longer needed, but you can keep it if it helps
-//   // with other parts of your code. You can try removing it.
-//   delay(5);
+  // A small delay can help with stability and prevent overwhelming the serial port
+  delay(5); 
 }
