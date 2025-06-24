@@ -1,6 +1,5 @@
 #include <Arduino.h>
 #include "PixelStrip.h"
-// #include "effects/Effects.h"
 #include "Triggers.h"      
 #include <PDM.h>           
 
@@ -28,26 +27,14 @@ PixelStrip strip(LED_PIN, LED_COUNT, BRIGHTNESS, SEGMENTS);
 PixelStrip::Segment *seg;
 AudioTrigger<SAMPLES> audioTrigger; 
 
-// --- State and Callback Functions ---
-// REMOVED: Redundant globals. State is now managed inside the Segment object.
-// EffectType currentEffect = RAINBOW;
-// bool flashTriggerActive = false;
-
-// These are still needed by the FlashOnTrigger::update function
-bool flashTriggerState = false;
-uint8_t flashTriggerBrightness = 0;
-void setFlashTrigger(bool value, uint8_t brightness = 0) {
-  flashTriggerState = value;
-  flashTriggerBrightness = brightness;
-}
-
+// The callback now calls the method on the segment object.
 void ledFlashCallback(bool isActive, uint8_t brightness) {
-    setFlashTrigger(isActive, brightness);
+    if (seg) {
+        seg->setTriggerState(isActive, brightness);
+    }
 }
 
-// REMOVED: This logic is now inside the PixelStrip::Segment class.
-// void applyEffect(...) { ... }
-
+// UPDATED: The handleSerial function with corrected logic for the "next" command
 void handleSerial() {
     if (Serial.available()) {
         String cmd = Serial.readStringUntil('\n');
@@ -55,7 +42,6 @@ void handleSerial() {
         cmd.toLowerCase();
 
         if (cmd.startsWith("setcolor")) {
-            // This logic remains in main as it controls a variable used here.
             int firstSpace = cmd.indexOf(' ');
             if (firstSpace != -1) {
                 int secondSpace = cmd.indexOf(' ', firstSpace + 1);
@@ -70,33 +56,57 @@ void handleSerial() {
         }
         else if (cmd == "bassflash") {
             Serial.println(">>> Trigger Mode: BASS");
-            audioTrigger.onTrigger(ledFlashCallback); // Controller logic
+            audioTrigger.onTrigger(ledFlashCallback);
             uint32_t flashColor = strip.Color(bassR, bassG, bassB);
             seg->startEffect(PixelStrip::Segment::SegmentEffect::FLASH_TRIGGER, flashColor);
         } else if (cmd == "stop") {
-             audioTrigger.onTrigger(nullptr); // Turn off trigger
+             audioTrigger.onTrigger(nullptr);
              seg->startEffect(PixelStrip::Segment::SegmentEffect::RAINBOW);
         } else if (cmd == "rainbow") {
             audioTrigger.onTrigger(nullptr);
             seg->startEffect(PixelStrip::Segment::SegmentEffect::RAINBOW);
         } else if (cmd == "solid") {
             audioTrigger.onTrigger(nullptr);
-            seg->startEffect(PixelStrip::Segment::SegmentEffect::SOLID);
+            uint32_t solidColor = strip.Color(0, 255, 0); // Start with green
+            seg->startEffect(PixelStrip::Segment::SegmentEffect::SOLID, solidColor);
+        }
+        else if (cmd == "rainbowcycle") {
+            audioTrigger.onTrigger(nullptr); 
+            seg->startEffect(PixelStrip::Segment::SegmentEffect::RAINBOW_CYCLE, 10);
+        }
+        else if (cmd == "theaterchase") {
+            audioTrigger.onTrigger(nullptr);
+            seg->startEffect(PixelStrip::Segment::SegmentEffect::THEATER_CHASE, 50);
         }
         else if (cmd == "next") {
-            audioTrigger.onTrigger(nullptr);
-            // Get current effect from the segment and cycle to the next one
-            auto current = seg->activeEffect;
-            switch (current) {
+            // --- THIS IS THE CORRECTED LOGIC ---
+            audioTrigger.onTrigger(nullptr); // Turn off trigger by default for most effects
+            
+            int current_val = static_cast<int>(seg->activeEffect);
+            int next_val = current_val + 1;
+            if (next_val >= static_cast<int>(PixelStrip::Segment::SegmentEffect::EFFECT_COUNT)) {
+                next_val = 1; // 1 is the first effect after NONE
+            }
+            auto next_effect = static_cast<PixelStrip::Segment::SegmentEffect>(next_val);
+
+            // Use a switch to start each effect with its correct default parameters
+            switch(next_effect) {
                 case PixelStrip::Segment::SegmentEffect::RAINBOW:
-                    seg->startEffect(PixelStrip::Segment::SegmentEffect::SOLID);
+                    seg->startEffect(next_effect); // No color needed
                     break;
                 case PixelStrip::Segment::SegmentEffect::SOLID:
-                    // For 'next', we go to bassflash with the default color
-                    audioTrigger.onTrigger(ledFlashCallback);
-                    seg->startEffect(PixelStrip::Segment::SegmentEffect::FLASH_TRIGGER);
+                    seg->startEffect(next_effect, strip.Color(0, 255, 0)); // Default to green
                     break;
                 case PixelStrip::Segment::SegmentEffect::FLASH_TRIGGER:
+                    audioTrigger.onTrigger(ledFlashCallback); // Re-enable trigger
+                    seg->startEffect(next_effect, strip.Color(bassR, bassG, bassB)); // Use bass color
+                    break;
+                case PixelStrip::Segment::SegmentEffect::RAINBOW_CYCLE:
+                    seg->startEffect(next_effect, 10); // Pass the wait time
+                    break;
+                case PixelStrip::Segment::SegmentEffect::THEATER_CHASE:
+                    seg->startEffect(next_effect, 50); // Pass the wait time
+                    break;
                 default:
                     seg->startEffect(PixelStrip::Segment::SegmentEffect::RAINBOW);
                     break;
@@ -104,6 +114,7 @@ void handleSerial() {
         }
     }
 }
+
 void onPDMdata() {
   int bytesAvailable = PDM.available();
   PDM.read((int16_t*)sampleBuffer, bytesAvailable);
@@ -127,16 +138,13 @@ void setup() {
       seg = strip.getSegments()[0]; 
   }
   seg->begin();
-
-  // Start with a default effect
   seg->startEffect(PixelStrip::Segment::SegmentEffect::RAINBOW);
 }
 
 void loop() {
   handleSerial();
   
-  // UPDATED: Check the segment's flashTriggerActive state directly
-  if (seg->flashTriggerActive && samplesRead > 0) {
+  if (samplesRead > 0) {
     audioTrigger.update(sampleBuffer);
     samplesRead = 0; 
   }
