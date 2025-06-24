@@ -5,6 +5,25 @@
 
 namespace Fire {
 
+// --- Helper functions to replace missing FastLED functions ---
+
+// qadd8: Adds two bytes with saturation at 255.
+inline byte qadd8(byte a, byte b) {
+    unsigned int sum = a + b;
+    if (sum > 255) {
+        return 255;
+    }
+    return static_cast<byte>(sum);
+}
+
+// qsub8: Subtracts one byte from another with saturation at 0.
+inline byte qsub8(byte a, byte b) {
+    if (b > a) {
+        return 0;
+    }
+    return a - b;
+}
+
 // --- Effect-specific constants you can tweak ---
 const int COOLING = 55;   // How fast the fire cools down. Less cooling = taller flames. (0-100)
 const int SPARKING = 120; // Chance of new sparks. Higher value = more intense fire. (0-255)
@@ -46,7 +65,8 @@ inline void update(PixelStrip::Segment* seg) {
 
     // Step 1. Cool down every cell a little
     for (int i = start; i <= end; i++) {
-      heat[i] = qsub8(heat[i], random8(0, ((COOLING * 10) / len) + 2));
+      // UPDATED: Replaced random8 and qsub8
+      heat[i] = qsub8(heat[i], random(0, ((COOLING * 10) / len) + 2));
     }
   
     // Step 2. Heat from each cell drifts 'up' and diffuses a little
@@ -55,9 +75,11 @@ inline void update(PixelStrip::Segment* seg) {
     }
     
     // Step 3. Randomly ignite new 'sparks' of heat at the bottom
-    if (random8() < SPARKING) {
-      int y = start + random8(7);
-      heat[y] = qadd8(heat[y], random8(160, 255));
+    // UPDATED: Replaced random8
+    if (random(255) < SPARKING) {
+      int y = start + random(7);
+      // UPDATED: Replaced qadd8 and random8
+      heat[y] = qadd8(heat[y], random(160, 255));
     }
 
     // Step 4. Map from heat cells to LED colors

@@ -10,7 +10,7 @@
     X(FLASH_TRIGGER, FlashOnTrigger) \
     X(RAINBOW_CYCLE, RainbowCycle) \
     X(THEATER_CHASE, TheaterChase)\
-    X(FIRE, Fire) \
+    X(FIRE, Fire)
     // * When you create a new effect, add its X macro line here. *
 
 #endif // EFFECTS_H
