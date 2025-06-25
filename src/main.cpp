@@ -2,6 +2,13 @@
 #include "PixelStrip.h"
 #include "Triggers.h"      
 #include <PDM.h>           
+#include <WiFiNINA.h> // ADDED: Required library to control the onboard RGB LED
+
+// Explicitly define LEDR, LEDG, LEDB as integer pin numbers
+// This bypasses the NinaPin object and its conversion restriction.
+#define LEDR 25 
+#define LEDG 26
+#define LEDB 27
 
 // --- System-wide Audio Constants ---
 #define SAMPLES 256
@@ -11,10 +18,9 @@
 #define LED_PIN 4
 #define LED_COUNT 300
 #define BRIGHTNESS 25
-#define SEGMENTS 2
+#define SEGMENTS 1
 
-// --- UPDATED: Active Color Variables ---
-// These now store the general-purpose color set by the 'setcolor' command.
+// --- Active Color Variables ---
 uint8_t activeR = 128;
 uint8_t activeG = 0;
 uint8_t activeB = 128; 
@@ -28,10 +34,88 @@ PixelStrip strip(LED_PIN, LED_COUNT, BRIGHTNESS, SEGMENTS);
 PixelStrip::Segment *seg;
 AudioTrigger<SAMPLES> audioTrigger; 
 
-// The callback calls the method on the strip object, which broadcasts the state.
+// --- Heartbeat Effect State Variables ---
+enum HeartbeatState { PULSE_1_UP, PULSE_1_DOWN, PAUSE_1, PULSE_2_UP, PULSE_2_DOWN, PAUSE_2 };
+HeartbeatState heartbeatState = PULSE_1_UP;
+unsigned long lastHeartbeatUpdate = 0;
+int heartbeatBrightness = 0; // This will now be a scaling factor (0-255)
+const int HEARTBEAT_STEP_DELAY = 10;
+const int HEARTBEAT_PAUSE_1 = 100;
+const int HEARTBEAT_PAUSE_2 = 700;
+
+// --- Callback and Command Functions ---
+
+// --- Callback and Command Functions ---
+
 void ledFlashCallback(bool isActive, uint8_t brightness) {
     strip.propagateTriggerState(isActive, brightness);
 }
+
+void updateHeartbeat() {
+    if (millis() - lastHeartbeatUpdate < HEARTBEAT_STEP_DELAY) return;
+    lastHeartbeatUpdate = millis();
+
+    switch(heartbeatState) {
+        case PULSE_1_UP:
+            heartbeatBrightness += 15;
+            if (heartbeatBrightness >= 255) {
+                heartbeatBrightness = 255;
+                heartbeatState = PULSE_1_DOWN;
+            }
+            break;
+        case PULSE_1_DOWN:
+            heartbeatBrightness -= 15;
+            if (heartbeatBrightness <= 0) {
+                heartbeatBrightness = 0;
+                heartbeatState = PAUSE_1;
+                lastHeartbeatUpdate = millis();
+            }
+            break;
+        case PAUSE_1:
+            if (millis() - lastHeartbeatUpdate > HEARTBEAT_PAUSE_1) {
+                heartbeatState = PULSE_2_UP;
+            }
+            break;
+        case PULSE_2_UP:
+            heartbeatBrightness += 15;
+            if (heartbeatBrightness >= 255) {
+                heartbeatBrightness = 255;
+                heartbeatState = PULSE_2_DOWN;
+            }
+            break;
+        case PULSE_2_DOWN:
+            heartbeatBrightness -= 15;
+            if (heartbeatBrightness <= 0) {
+                heartbeatBrightness = 0;
+                heartbeatState = PAUSE_2;
+                lastHeartbeatUpdate = millis();
+            }
+            break;
+        case PAUSE_2:
+            if (millis() - lastHeartbeatUpdate > HEARTBEAT_PAUSE_2) {
+                heartbeatState = PULSE_1_UP;
+            }
+            break;
+    }
+
+    // Calculate the actual brightness for each color channel
+    // Scale activeR, activeG, activeB by heartbeatBrightness (0-255)
+    // The division by 255.0f ensures floating point division for accurate scaling
+    int currentR = (int)(activeR * (heartbeatBrightness / 255.0f));
+    int currentG = (int)(activeG * (heartbeatBrightness / 255.0f));
+    int currentB = (int)(activeB * (heartbeatBrightness / 255.0f));
+
+    // Ensure values stay within 0-255 range (though scaling should keep them there)
+    currentR = constrain(currentR, 0, 255);
+    currentG = constrain(currentG, 0, 255);
+    currentB = constrain(currentB, 0, 255);
+    
+    WiFiDrv::analogWrite(LEDR, currentR); 
+    WiFiDrv::analogWrite(LEDG, currentG); 
+    WiFiDrv::analogWrite(LEDB, currentB); 
+}
+
+
 
 void handleSerial() {
     if (Serial.available()) {
@@ -48,8 +132,7 @@ void handleSerial() {
         }
         cmd_base.toLowerCase();
 
-        // --- Command Handling ---
-
+        // ... (All of your existing serial command logic remains here)
         if (cmd_base == "clearsegments") {
             Serial.println("Clearing all user-defined segments...");
             strip.clearUserSegments();
@@ -82,52 +165,40 @@ void handleSerial() {
         else if (cmd_base == "setcolor") {
             int firstSpace = cmd_params.indexOf(' ');
             int secondSpace = cmd_params.indexOf(' ', firstSpace + 1);
-
             if (firstSpace > 0 && secondSpace > 0) {
                 activeR = cmd_params.substring(0, firstSpace).toInt();
                 activeG = cmd_params.substring(firstSpace + 1, secondSpace).toInt();
                 activeB = cmd_params.substring(secondSpace + 1).toInt();
                 Serial.print("Active color set to: R=");
-                Serial.print(activeR);
-                Serial.print(" G=");
-                Serial.print(activeG);
-                Serial.print(" B=");
+                Serial.print(activeR); Serial.print(" G=");
+                Serial.print(activeG); Serial.print(" B=");
                 Serial.println(activeB);
-            } else {
-                Serial.println("Invalid format. Use: setcolor <r> <g> <b>");
-            }
+            } else { Serial.println("Invalid format. Use: setcolor <r> <g> <b>"); }
         }
         else if (cmd_base == "bassflash") {
-            // UPDATED: Now uses the active color
-            uint32_t flashColor = strip.Color(activeR, activeG, activeB);
-            seg->startEffect(PixelStrip::Segment::SegmentEffect::FLASH_TRIGGER, flashColor);
+            seg->startEffect(PixelStrip::Segment::SegmentEffect::FLASH_TRIGGER, strip.Color(activeR, activeG, activeB));
         }
         else if (cmd_base == "solid") {
-            // UPDATED: Now uses the active color instead of being hardcoded to green
-            uint32_t solidColor = strip.Color(activeR, activeG, activeB);
-            seg->startEffect(PixelStrip::Segment::SegmentEffect::SOLID, solidColor);
+            seg->startEffect(PixelStrip::Segment::SegmentEffect::SOLID, strip.Color(activeR, activeG, activeB));
         }
         else if (cmd_base == "rainbow" || cmd_base == "stop") {
             seg->startEffect(PixelStrip::Segment::SegmentEffect::RAINBOW);
         }
-        else if (cmd_base == "fire") {
+        else if (cmd_base == "fire" || cmd_base == "flare") {
             uint32_t p1 = 0, p2 = 0;
             int space_idx = cmd_params.indexOf(' ');
             if (cmd_params.length() > 0) {
                 if (space_idx != -1) {
                     p1 = cmd_params.substring(0, space_idx).toInt();
                     p2 = cmd_params.substring(space_idx + 1).toInt();
-                } else {
-                    p1 = cmd_params.toInt();
-                }
+                } else { p1 = cmd_params.toInt(); }
             }
-            seg->startEffect(PixelStrip::Segment::SegmentEffect::FIRE, p1, p2);
+            if(cmd_base == "fire") seg->startEffect(PixelStrip::Segment::SegmentEffect::FIRE, p1, p2);
+            else seg->startEffect(PixelStrip::Segment::SegmentEffect::FLARE, p1, p2);
         }
         else if (cmd_base == "rainbowcycle" || cmd_base == "theaterchase") {
             uint32_t p1 = 0;
-            if (cmd_params.length() > 0) {
-                p1 = cmd_params.toInt();
-            }
+            if (cmd_params.length() > 0) { p1 = cmd_params.toInt(); }
             if (cmd_base == "rainbowcycle") seg->startEffect(PixelStrip::Segment::SegmentEffect::RAINBOW_CYCLE, p1);
             else seg->startEffect(PixelStrip::Segment::SegmentEffect::THEATER_CHASE, p1);
         }
@@ -140,7 +211,6 @@ void handleSerial() {
             auto next_effect = static_cast<PixelStrip::Segment::SegmentEffect>(next_val);
             
             switch(next_effect) {
-                // UPDATED: These effects now use the active color when cycling
                 case PixelStrip::Segment::SegmentEffect::SOLID:
                 case PixelStrip::Segment::SegmentEffect::FLASH_TRIGGER:
                     seg->startEffect(next_effect, strip.Color(activeR, activeG, activeB));
@@ -152,6 +222,7 @@ void handleSerial() {
                     seg->startEffect(next_effect, 50);
                     break;
                 case PixelStrip::Segment::SegmentEffect::FIRE:
+                case PixelStrip::Segment::SegmentEffect::FLARE:
                     seg->startEffect(next_effect, 0, 0);
                     break;
                 default:
@@ -172,6 +243,23 @@ void setup() {
   Serial.begin(115200);
   while (!Serial);
 
+    // Initialize the onboard LED pins
+  // For common anode, to start OFF, you'd write 255 to all channels.
+  WiFiDrv::analogWrite(LEDR, 255); // Off (for common anode)
+  WiFiDrv::analogWrite(LEDG, 255); // Off (for common anode)
+  WiFiDrv::analogWrite(LEDB, 255); // Off (for common anode)
+
+  // Check for the WiFi module and firmware
+  if (WiFi.status() == WL_NO_MODULE) {
+    Serial.println("Communication with WiFi module failed!");
+    // Set onboard LED to solid red to indicate an error (full red for common anode)
+    WiFiDrv::analogWrite(LEDR, 0);   // Full brightness red (for common anode)
+    WiFiDrv::analogWrite(LEDG, 255); // Off green (for common anode)
+    WiFiDrv::analogWrite(LEDB, 255); // Off blue (for common anode)
+    while (true);
+  }
+
+  // Set up the audio trigger ONCE and leave it on
   PDM.onReceive(onPDMdata);
   audioTrigger.onTrigger(ledFlashCallback); 
   if (!PDM.begin(1, SAMPLING_FREQUENCY)) {
@@ -193,6 +281,8 @@ void loop() {
     audioTrigger.update(sampleBuffer);
     samplesRead = 0; 
   }
+  
+  updateHeartbeat();
 
   for (auto* s : strip.getSegments()) {
     s->update();

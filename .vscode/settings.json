@@ -7,10 +7,13 @@
         "picotool",
         "PINMAP",
         "qadd",
+        "qsub",
         "RAINBOWCHASE",
+        "rainbowcycle",
         "random8",
         "raspberrypi",
         "SERIALCONTROLLER",
+        "theaterchase",
         "triggeroff",
         "triggeron"
     ]
