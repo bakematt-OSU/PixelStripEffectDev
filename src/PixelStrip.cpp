@@ -6,6 +6,7 @@
 #include "effects/TheaterChase.h"
 #include "effects/Fire.h"
 #include "effects/Flare.h"
+#include "effects/ColoredFireEffect.h"
 
 //================================================================================
 // PixelStrip Class Methods
