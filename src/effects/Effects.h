@@ -12,7 +12,9 @@
     X(THEATER_CHASE, TheaterChase)   \
     X(FIRE, Fire)                    \
     X(FLARE, Flare)                  \
-    X(COLORED_FIRE, ColoredFireEffect)
+    X(COLORED_FIRE, ColoredFire) \
+    X(ACCEL_METER, AccelMeter) \
+    X(KINETIC_RIPPLE, KineticRipple)
 // * When you create a new effect, add its X macro line here. *
 
 #endif // EFFECTS_H

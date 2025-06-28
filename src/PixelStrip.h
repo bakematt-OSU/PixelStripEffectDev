@@ -64,13 +64,17 @@ public:
         uint8_t chaseOffset = 0;
 
         // Configurable parameters for the Fire effect
-        uint8_t fireSparking = 120; // Default value: 120
-        uint8_t fireCooling = 55;   // Default value: 55
+        uint8_t fireSparking = 120;
+        uint8_t fireCooling = 55;
 
         // Configurable parameters for the colored fire effect
-        uint32_t fireColor1 = 0x000000; // Black (coolest)
-        uint32_t fireColor2 = 0xFF0000; // Red (medium)
-        uint32_t fireColor3 = 0xFFFF00; // Yellow (hottest)
+        uint32_t fireColor1 = 0x000000;
+        uint32_t fireColor2 = 0xFF0000;
+        uint32_t fireColor3 = 0xFFFF00;
+
+        // --- ADDED: Configurable parameters for the Kinetic Ripple effect ---
+        int rippleWidth = 3;      // The width of the ripple in pixels
+        float rippleSpeed = 0.2f; // The speed/fade duration of the ripple
 
     private:
         PixelStrip &parent;

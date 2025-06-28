@@ -3,10 +3,20 @@
 #include "Triggers.h"
 #include <PDM.h>
 #include <WiFiNINA.h>
+#include <Arduino_LSM6DSOX.h>
+#include <math.h>
 
 #define LEDR 25
 #define LEDG 26
 #define LEDB 27
+
+// --- Accelerometer Data & Step Detection ---
+float accelX = 0, accelY = 0, accelZ = 0;
+volatile bool triggerRipple = false;
+float STEP_MAGNITUDE_THRESHOLD = 2.5f;
+const unsigned long STEP_COOLDOWN = 300;
+unsigned long lastStepTime = 0;
+bool debugAccel = false;
 
 // --- System-wide Audio Constants ---
 #define SAMPLES 256
@@ -180,29 +190,80 @@ void handleSerial()
                 seg->fireColor2 = strip.Color(r2, g2, b2);
                 seg->fireColor3 = strip.Color(r3, g3, b3);
                 Serial.println("Fire colors updated.");
-                Serial.print("C1: ");
-                Serial.print(r1);
-                Serial.print(",");
-                Serial.print(g1);
-                Serial.print(",");
-                Serial.println(b1);
-                Serial.print("C2: ");
-                Serial.print(r2);
-                Serial.print(",");
-                Serial.print(g2);
-                Serial.print(",");
-                Serial.println(b2);
-                Serial.print("C3: ");
-                Serial.print(r3);
-                Serial.print(",");
-                Serial.print(g3);
-                Serial.print(",");
-                Serial.println(b3);
             }
             else
             {
                 Serial.println("Invalid format. Use: setfirecolors <r1> <g1> <b1> <r2> <g2> <b2> <r3> <g3> <b3>");
             }
+        }
+        else if (cmd_base == "setthreshold")
+        {
+            if (cmd_params.length() > 0)
+            {
+                float new_threshold = cmd_params.toFloat();
+                if (new_threshold > 1.0)
+                {
+                    STEP_MAGNITUDE_THRESHOLD = new_threshold;
+                    Serial.print("Ripple threshold set to: ");
+                    Serial.println(STEP_MAGNITUDE_THRESHOLD);
+                }
+                else
+                {
+                    Serial.println("Error: Threshold must be greater than 1.0.");
+                }
+            }
+            else
+            {
+                Serial.println("Invalid format. Use: setthreshold <value>");
+            }
+        }
+        else if (cmd_base == "setripplewidth") // --- NEW COMMAND ---
+        {
+            if (cmd_params.length() > 0)
+            {
+                int new_width = cmd_params.toInt();
+                if (new_width > 0 && new_width % 2 != 0)
+                {
+                    seg->rippleWidth = new_width;
+                    Serial.print("Ripple width set to: ");
+                    Serial.println(seg->rippleWidth);
+                }
+                else
+                {
+                    Serial.println("Error: Width must be a positive, odd number (e.g., 1, 3, 5).");
+                }
+            }
+            else
+            {
+                Serial.println("Invalid format. Use: setripplewidth <width>");
+            }
+        }
+        else if (cmd_base == "setripplespeed") // --- NEW COMMAND ---
+        {
+            if (cmd_params.length() > 0)
+            {
+                float new_speed = cmd_params.toFloat();
+                if (new_speed > 0.0)
+                {
+                    seg->rippleSpeed = new_speed;
+                    Serial.print("Ripple speed (fade duration) set to: ");
+                    Serial.println(seg->rippleSpeed);
+                }
+                else
+                {
+                    Serial.println("Error: Speed must be a positive number.");
+                }
+            }
+            else
+            {
+                Serial.println("Invalid format. Use: setripplespeed <speed>");
+            }
+        }
+        else if (cmd_base == "debugaccel")
+        {
+            debugAccel = !debugAccel;
+            Serial.print("Accelerometer debugging is now ");
+            Serial.println(debugAccel ? "ON" : "OFF");
         }
         else if (cmd_base == "bassflash")
         {
@@ -215,6 +276,11 @@ void handleSerial()
         else if (cmd_base == "rainbow" || cmd_base == "stop")
         {
             seg->startEffect(PixelStrip::Segment::SegmentEffect::RAINBOW);
+        }
+        else if (cmd_base == "kineticripple")
+        {
+            seg->startEffect(PixelStrip::Segment::SegmentEffect::KINETIC_RIPPLE, strip.Color(activeR, activeG, activeB));
+            Serial.println("Starting Kinetic Ripple effect.");
         }
         else if (cmd_base == "fire" || cmd_base == "flare")
         {
@@ -239,7 +305,6 @@ void handleSerial()
         }
         else if (cmd_base == "coloredfire")
         {
-            // This effect now uses the colors set by 'setfirecolors'
             seg->startEffect(PixelStrip::Segment::SegmentEffect::COLORED_FIRE, 0, 0);
             Serial.println("Starting Colored Fire effect.");
         }
@@ -268,6 +333,8 @@ void handleSerial()
             switch (next_effect)
             {
             case PixelStrip::Segment::SegmentEffect::SOLID:
+            case PixelStrip::Segment::SegmentEffect::ACCEL_METER:
+            case PixelStrip::Segment::SegmentEffect::KINETIC_RIPPLE:
             case PixelStrip::Segment::SegmentEffect::FLASH_TRIGGER:
                 seg->startEffect(next_effect, strip.Color(activeR, activeG, activeB));
                 break;
@@ -279,6 +346,7 @@ void handleSerial()
                 break;
             case PixelStrip::Segment::SegmentEffect::FIRE:
             case PixelStrip::Segment::SegmentEffect::FLARE:
+            case PixelStrip::Segment::SegmentEffect::COLORED_FIRE:
                 seg->startEffect(next_effect, 0, 0);
                 break;
             default:
@@ -299,8 +367,13 @@ void onPDMdata()
 void setup()
 {
     Serial.begin(115200);
-    while (!Serial)
-        ;
+    while (!Serial);
+
+    if (!IMU.begin())
+    {
+        Serial.println("Failed to initialize IMU!");
+        while (1);
+    }
 
     WiFiDrv::analogWrite(LEDR, 0);
     WiFiDrv::analogWrite(LEDG, 0);
@@ -312,17 +385,15 @@ void setup()
         WiFiDrv::analogWrite(LEDR, 255);
         WiFiDrv::analogWrite(LEDG, 0);
         WiFiDrv::analogWrite(LEDB, 0);
-        while (true)
-            ;
+        while (true);
     }
-
+    
     PDM.onReceive(onPDMdata);
     audioTrigger.onTrigger(ledFlashCallback);
     if (!PDM.begin(1, SAMPLING_FREQUENCY))
     {
         Serial.println("Failed to start PDM!");
-        while (1)
-            ;
+        while (1);
     }
 
     strip.begin();
@@ -340,6 +411,28 @@ void loop()
     {
         audioTrigger.update(sampleBuffer);
         samplesRead = 0;
+    }
+
+    if (IMU.accelerationAvailable())
+    {
+        IMU.readAcceleration(accelX, accelY, accelZ);
+
+        float magnitude = sqrt(accelX * accelX + accelY * accelY + accelZ * accelZ);
+
+        if (debugAccel) {
+            static unsigned long lastPrintTime = 0;
+            if (millis() - lastPrintTime > 250) {
+                Serial.print("Accel Magnitude: ");
+                Serial.println(magnitude);
+                lastPrintTime = millis();
+            }
+        }
+
+        if (magnitude > STEP_MAGNITUDE_THRESHOLD && (millis() - lastStepTime > STEP_COOLDOWN))
+        {
+            triggerRipple = true;
+            lastStepTime = millis();
+        }
     }
 
     updateHeartbeat();

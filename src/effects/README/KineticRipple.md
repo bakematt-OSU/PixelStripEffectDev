@@ -88,20 +88,3 @@ setthreshold 1.7
 kineticripple
 ```
 
-### 2\. Create a Fire Effect on the Top of the Cape
-
-This example creates a new segment for just the first 100 pixels and puts a custom-colored fire effect on it.
-
-```
-// Create a new segment for pixels 0-99
-addsegment 0 99
-
-// Select the new segment (which will be index 1)
-select 1
-
-// Set the colors for a spooky green fire
-setfirecolors 0 30 10 50 255 50 150 255 150
-
-// Start the effect on the selected segment
-coloredfire
-```
