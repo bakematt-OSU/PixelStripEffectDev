@@ -19,7 +19,6 @@
 #define SEGMENTS 0
 
 // --- Active Color Variables ---
-// These are now primarily for other effects, not the heartbeat directly.
 uint8_t activeR = 128;
 uint8_t activeG = 0;
 uint8_t activeB = 128;
@@ -33,25 +32,16 @@ PixelStrip strip(LED_PIN, LED_COUNT, BRIGHTNESS, SEGMENTS);
 PixelStrip::Segment *seg;
 AudioTrigger<SAMPLES> audioTrigger;
 
-// --- Heartbeat Effect State Variables (MODIFIED) ---
+// --- Heartbeat Effect State Variables ---
 enum HeartbeatColorState
 {
     HEARTBEAT_RED,
     HEARTBEAT_GREEN,
     HEARTBEAT_BLUE
 };
-HeartbeatColorState heartbeatColorState = HEARTBEAT_RED;    // Start with red
-unsigned long lastHeartbeatColorChange = 0;                 // Tracks when the color last changed
-const unsigned long HEARTBEAT_COLOR_CHANGE_INTERVAL = 2000; // 2 seconds
-
-// REMOVED: Old heartbeat pulse states and related variables are no longer needed.
-// enum HeartbeatState { PULSE_1_UP, PULSE_1_DOWN, PAUSE_1, PULSE_2_UP, PULSE_2_DOWN, PAUSE_2 };
-// HeartbeatState heartbeatState = PULSE_1_UP;
-// unsigned long lastHeartbeatUpdate = 0;
-// int heartbeatBrightness = 0;
-// const int HEARTBEAT_STEP_DELAY = 10;
-// const int HEARTBEAT_PAUSE_1 = 100;
-// const int HEARTBEAT_PAUSE_2 = 700;
+HeartbeatColorState heartbeatColorState = HEARTBEAT_RED;
+unsigned long lastHeartbeatColorChange = 0;
+const unsigned long HEARTBEAT_COLOR_CHANGE_INTERVAL = 2000;
 
 // --- Callback and Command Functions ---
 
@@ -60,7 +50,6 @@ void ledFlashCallback(bool isActive, uint8_t brightness)
     strip.propagateTriggerState(isActive, brightness);
 }
 
-// MODIFIED: updateHeartbeat function for individual color flashing
 void updateHeartbeat()
 {
     if (millis() - lastHeartbeatColorChange < HEARTBEAT_COLOR_CHANGE_INTERVAL)
@@ -69,7 +58,6 @@ void updateHeartbeat()
     }
     lastHeartbeatColorChange = millis();
 
-    // Turn off all LEDs initially before setting the new one
     WiFiDrv::analogWrite(LEDR, 0);
     WiFiDrv::analogWrite(LEDG, 0);
     WiFiDrv::analogWrite(LEDB, 0);
@@ -77,16 +65,16 @@ void updateHeartbeat()
     switch (heartbeatColorState)
     {
     case HEARTBEAT_RED:
-        WiFiDrv::analogWrite(LEDR, 255);       // Turn Red on
-        heartbeatColorState = HEARTBEAT_GREEN; // Next state will be Green
+        WiFiDrv::analogWrite(LEDR, 255);
+        heartbeatColorState = HEARTBEAT_GREEN;
         break;
     case HEARTBEAT_GREEN:
-        WiFiDrv::analogWrite(LEDG, 255);      // Turn Green on
-        heartbeatColorState = HEARTBEAT_BLUE; // Next state will be Blue
+        WiFiDrv::analogWrite(LEDG, 255);
+        heartbeatColorState = HEARTBEAT_BLUE;
         break;
     case HEARTBEAT_BLUE:
-        WiFiDrv::analogWrite(LEDB, 255);     // Turn Blue on
-        heartbeatColorState = HEARTBEAT_RED; // Next state will be Red (cycle back)
+        WiFiDrv::analogWrite(LEDB, 255);
+        heartbeatColorState = HEARTBEAT_RED;
         break;
     }
 }
@@ -109,7 +97,6 @@ void handleSerial()
         }
         cmd_base.toLowerCase();
 
-        // ... (All of your existing serial command logic remains here)
         if (cmd_base == "clearsegments")
         {
             Serial.println("Clearing all user-defined segments...");
@@ -182,6 +169,41 @@ void handleSerial()
                 Serial.println("Invalid format. Use: setcolor <r> <g> <b>");
             }
         }
+        else if (cmd_base == "setfirecolors")
+        {
+            // Expects 9 integer values: R1 G1 B1 R2 G2 B2 R3 G3 B3
+            int r1, g1, b1, r2, g2, b2, r3, g3, b3;
+            int n = sscanf(cmd_params.c_str(), "%d %d %d %d %d %d %d %d %d", &r1, &g1, &b1, &r2, &g2, &b2, &r3, &g3, &b3);
+            if (n == 9)
+            {
+                seg->fireColor1 = strip.Color(r1, g1, b1);
+                seg->fireColor2 = strip.Color(r2, g2, b2);
+                seg->fireColor3 = strip.Color(r3, g3, b3);
+                Serial.println("Fire colors updated.");
+                Serial.print("C1: ");
+                Serial.print(r1);
+                Serial.print(",");
+                Serial.print(g1);
+                Serial.print(",");
+                Serial.println(b1);
+                Serial.print("C2: ");
+                Serial.print(r2);
+                Serial.print(",");
+                Serial.print(g2);
+                Serial.print(",");
+                Serial.println(b2);
+                Serial.print("C3: ");
+                Serial.print(r3);
+                Serial.print(",");
+                Serial.print(g3);
+                Serial.print(",");
+                Serial.println(b3);
+            }
+            else
+            {
+                Serial.println("Invalid format. Use: setfirecolors <r1> <g1> <b1> <r2> <g2> <b2> <r3> <g3> <b3>");
+            }
+        }
         else if (cmd_base == "bassflash")
         {
             seg->startEffect(PixelStrip::Segment::SegmentEffect::FLASH_TRIGGER, strip.Color(activeR, activeG, activeB));
@@ -215,6 +237,12 @@ void handleSerial()
             else
                 seg->startEffect(PixelStrip::Segment::SegmentEffect::FLARE, p1, p2);
         }
+        else if (cmd_base == "coloredfire")
+        {
+            // This effect now uses the colors set by 'setfirecolors'
+            seg->startEffect(PixelStrip::Segment::SegmentEffect::COLORED_FIRE, 0, 0);
+            Serial.println("Starting Colored Fire effect.");
+        }
         else if (cmd_base == "rainbowcycle" || cmd_base == "theaterchase")
         {
             uint32_t p1 = 0;
@@ -226,13 +254,6 @@ void handleSerial()
                 seg->startEffect(PixelStrip::Segment::SegmentEffect::RAINBOW_CYCLE, p1);
             else
                 seg->startEffect(PixelStrip::Segment::SegmentEffect::THEATER_CHASE, p1);
-        }
-        else if (cmd_base == "coloredfire")
-        {
-            // This effect uses the currently set active color
-            uint32_t base_color = strip.Color(activeR, activeG, activeB);
-            seg->startEffect(PixelStrip::Segment::SegmentEffect::COLORED_FIRE, base_color, 0);
-            Serial.println("Starting Colored Fire effect.");
         }
         else if (cmd_base == "next")
         {
@@ -281,25 +302,20 @@ void setup()
     while (!Serial)
         ;
 
-    // Initialize the onboard LED pins (Common Cathode: 0 = off, 255 = brightest)
-    // Ensure the LED starts off by setting all channels to 0.
     WiFiDrv::analogWrite(LEDR, 0);
     WiFiDrv::analogWrite(LEDG, 0);
     WiFiDrv::analogWrite(LEDB, 0);
 
-    // Check for the WiFi module and firmware
     if (WiFi.status() == WL_NO_MODULE)
     {
         Serial.println("Communication with WiFi module failed!");
-        // Set onboard LED to solid red to indicate an error (full red, green/blue off)
-        WiFiDrv::analogWrite(LEDR, 255); // Full brightness red
-        WiFiDrv::analogWrite(LEDG, 0);   // Off green
-        WiFiDrv::analogWrite(LEDB, 0);   // Off blue
+        WiFiDrv::analogWrite(LEDR, 255);
+        WiFiDrv::analogWrite(LEDG, 0);
+        WiFiDrv::analogWrite(LEDB, 0);
         while (true)
             ;
     }
 
-    // Set up the audio trigger
     PDM.onReceive(onPDMdata);
     audioTrigger.onTrigger(ledFlashCallback);
     if (!PDM.begin(1, SAMPLING_FREQUENCY))
